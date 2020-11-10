@@ -1,0 +1,74 @@
+lasinfo (200304) report for 'C:\Users\Mike\Documents\Research\Duke_lidar1\data\shapefiles\file1_UTM_fix.laz'
+reporting all LAS header entries:
+  file signature:             'LASF'
+  file source ID:             0
+  global_encoding:            0
+  project ID GUID data 1-4:   00000000-0000-0000-0000-000000000000
+  version major.minor:        1.0
+  system identifier:          'LAStools (c) by rapidlasso GmbH'
+  generating software:        'las2las (version 200304)'
+  file creation day/year:     0/0
+  header size:                227
+  offset to point data:       491
+  number var. length records: 4
+  point data format:          1
+  point data record length:   28
+  number of point records:    4647466
+  number of points by return: 2320958 2326508 0 0 0
+  scale factor x y z:         0.01 0.01 0.01
+  offset x y z:               500000 4400000 0
+  min x y z:                  526502.17 4486499.99 26.56
+  max x y z:                  528002.17 4488000.00 84.39
+variable length header record 1 of 4:
+  reserved             43707
+  user ID              'NOAA_CSC'
+  record ID            128
+  length after header  2
+  description          'QA Level'
+variable length header record 2 of 4:
+  reserved             43707
+  user ID              'NOAA_CSC'
+  record ID            130
+  length after header  2
+  description          'Project ID'
+variable length header record 3 of 4:
+  reserved             43707
+  user ID              'NOAA_CSC'
+  record ID            129
+  length after header  2
+  description          'Sort Order'
+variable length header record 4 of 4:
+  reserved             0
+  user ID              'LASF_Projection'
+  record ID            34735
+  length after header  40
+  description          'by LAStools of rapidlasso GmbH'
+    GeoKeyDirectoryTag version 1.1.0 number of keys 4
+      key 1024 tiff_tag_location 0 count 1 value_offset 1 - GTModelTypeGeoKey: ModelTypeProjected
+      key 3072 tiff_tag_location 0 count 1 value_offset 32618 - ProjectedCSTypeGeoKey: WGS 84 / UTM 18N
+      key 3076 tiff_tag_location 0 count 1 value_offset 9001 - ProjLinearUnitsGeoKey: Linear_Meter
+      key 4099 tiff_tag_location 0 count 1 value_offset 9001 - VerticalUnitsGeoKey: Linear_Meter
+the header is followed by 2 user-defined bytes
+LASzip compression (version 3.4r3 c2 50000): POINT10 2 GPSTIME11 2
+reporting minimum and maximum for all LAS point record entries ...
+  X             2650217    2800217
+  Y             8649999    8800000
+  Z                2656       8439
+  intensity           1       2760
+  return_number       1          2
+  number_of_returns   2          2
+  edge_of_flight_line 0          0
+  scan_direction_flag 0          0
+  classification      1          2
+  scan_angle_rank   -20         19
+  user_data           0          0
+  point_source_ID    36         51
+  gps_time 311.105600 3670.277800
+number of first returns:        2320958
+number of intermediate returns: 0
+number of last returns:         2326508
+number of single returns:       0
+overview over number of returns of given pulse: 0 4647466 0 0 0 0 0
+histogram of classification of points:
+         1154239  unclassified (1)
+         3493227  ground (2)

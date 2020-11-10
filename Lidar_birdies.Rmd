@@ -1,0 +1,191 @@
+---
+title: "Lidar Birdies"
+author: "Mike Allen"
+date: "5/16/2020"
+output: html_document
+---
+
+```{r}
+library(raster)
+library(rgdal)
+library(sp)
+library(tidyverse)
+library(rgrass7)
+library(RQGIS3)
+```
+
+```{r}
+
+# note: digital surface models were created from 6 lidar file 
+#       used LASTools "blast2dem", which is why there is a black diagonal line in some
+dem1<-raster("data/dem1.tif")
+dem2<-raster("data/dem2.tif")
+dem3<-raster("data/dem3.tif")
+dem4<-raster("data/dem4.tif")
+dem5<-raster("data/dem5.tif")
+dem6<-raster("data/dem6.tif")
+
+# merge the DEMs into one big one
+x <- list(dem1, dem2, dem3, dem4, dem5, dem6)
+#names(x) <- c("x", "y")
+#x$filename <- 'test.tif'
+x$overwrite <- TRUE
+m <- do.call(merge, x)
+
+duke.geo<-readOGR("data","duke_studyareas")
+duke = spTransform(duke.geo, crs(dem1))
+
+```
+
+```{r}
+plot(m)
+plot(duke, bg="transparent", add=TRUE)
+```
+```{r}
+
+writeRaster(m, "")
+
+r <- writeRaster(m, filename=file.path(paste0(getwd(),"/data"), "m.tif"), format="GTiff", overwrite=TRUE)
+r2<-raster("data/m.tif")
+
+proj4string(r2)
+```
+
+
+```{r}
+
+# setup a temp workingdir
+working.dir<- "~/tmp/"
+
+# get meuse data
+
+data(meuse)
+data(meuse.grid)
+
+# georeference the meuse grid data
+coordinates(meuse.grid) <- ~x+y
+proj4string(meuse.grid) <- CRS("+init=epsg:28992")
+gridded(meuse.grid) <- TRUE
+
+# get a first cellsize/pixel resolution for GRASS
+resolution <- meuse.grid at grid@cellsize[1]
+
+# georeference the meuse data
+coordinates(meuse) <- ~x+y
+proj4string(meuse) <- as.character(CRS("+init=epsg:28992"))
+
+# get projection, proj4 string and extent for GRASS
+projection<-(strsplit(meuse at proj4string@projargs,split = " "))
+proj4<- paste(projection[[1]][2:length(unlist(projection))], collapse = ' ')
+xmax<-meuse at bbox[3]
+xmin<-meuse at bbox[1]
+ymax<-meuse at bbox[4]
+ymin<-meuse@@bbox[2]
+
+# create and set working directory
+if (!file.exists(file.path(working.dir,"run"))){
+   dir.create(file.path(working.dir,"run"),recursive = TRUE)
+}
+setwd(file.path( working.dir,"run"))
+
+
+############ set up GRASS RUNTIME environment
+
+# define the GRASS executable path
+if(Sys.info()["sysname"] == "Windows"){
+   grass.gis.base<-'C:/OSGeo4W64/apps/grass/grass-7.0.5'
+}else {
+   grass.gis.base<-'/usr/lib/grass72'
+}
+
+# set path for optional GRASS addons
+Sys.setenv(GRASS_ADDON_PATH="~/.grass7/addons")
+
+# create the TEMPORARY GRASS location
+rgrass7::initGRASS(gisBase=grass.gis.base,
+                    home=tempdir(),
+                    mapset='PERMANENT',
+                    override=TRUE
+)
+
+# assign GRASS projection according to data set
+rgrass7::execGRASS('g.proj',
+                    flags=c('c','quiet'),
+                    proj4=proj4
+)
+
+# assign GRASS extent and resolution
+rgrass7::execGRASS('g.region',
+                    flags=c('quiet'),
+                    n=as.character(ymax),
+                    s=as.character(ymin),
+                    e=as.character(xmax),
+                    w=as.character(xmin),
+                    res=as.character(resolution)
+)
+
+
+#############   now do GRASS STUFF
+
+writeVECT(meuse,"meuse")
+execGRASS("v.db.addcolumn", map = "meuse", columns = "area_m2 double
+precision")
+
+
+```
+
+
+```{r}
+
+setwd(".") # Working directory 
+
+# Set on-disk raster variable
+rname <- paste(getwd(), "data/", sep="/")
+
+# Set GRASS environment and database location 
+loc <- initGRASS(gisBase = "C:/OSGeo4W/apps/grass/grass78", 
+       home="C:/Users/Mike/Documents/GIS DataBase", gisDbase="C:/Users/Mike/Documents/GIS DataBase", override=T)
+
+# Import raster to GRASS and set region
+execGRASS("r.in.gdal", flags="o", parameters=list(input=m, output="tmprast"))
+execGRASS("g.region", parameters=list(raster="tmprast") ) 
+
+# Calculate 9x9 focal mean 
+execGRASS("r.neighbors", flags="overwrite", parameters=list(input="tmprast", output="xxfm", 
+          method="average", size=as.integer(9)) )
+
+r <- readRAST("xxfm")
+  spplot(r)
+```
+
+```{r}
+# download German administrative areas 
+ger = getData(name = "GADM", country = "DEU", level = 1)
+# ger is of class "SpatialPolygonsDataFrame"
+
+# set the environment, i.e. specify all the paths necessary to run QGIS from 
+# within R
+set_env()
+# under Windows set_env would be much faster if you specify the root path:
+# set_env("C:/OSGeo4W~1")
+
+RQGIS3::open_app()
+
+RQGIS3::find_algorithms(search_term = "horizon", name_only = TRUE)
+
+get_usage(alg = "grass7:r.horizon")
+
+
+params$INPUT = m
+params$OUTPUT = file.path(tempdir(), "ger_coords.shp")
+out = run_qgis(alg = "native:centroids",
+               params = params,
+               load_output = TRUE)
+#>$OUTPUT
+#>[1] "/tmp/RtmpC6SKby/ger_coords.shp"
+
+
+elevation = m, step = 1, start = 0, end = 359, maxdistance = 1000, d = 
+
+```
+

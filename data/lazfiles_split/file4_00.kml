@@ -1,0 +1,11 @@
+<GroundOverlay>
+  <name>E528.002k N4488.288k</name>
+  <Icon><href>file4_00.tif</href></Icon>
+  <LatLonBox>
+  <south>40.5448600136</south>
+  <west>-74.6692831955</west>
+  <north>40.5557881752</north>
+  <east>-74.6615823888</east>
+  <rotation>-0.2255308304</rotation>
+  </LatLonBox>
+</GroundOverlay>
