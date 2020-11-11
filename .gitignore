@@ -3,6 +3,5 @@
 .RData
 .Ruserdata
 mapping/
-GRASS_TEMP/
-data/
+data/horizon/
 data/old_data/

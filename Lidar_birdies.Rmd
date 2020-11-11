@@ -21,22 +21,8 @@ library(tmaptools)
 duke <- 
    read_sf("data/duke_GL_pred_areas.shp") %>%
    st_transform(crs = 32618)
-
-
-
-bare_earth_ft <-
-   raster("data/bare_earth_2018.tif") %>%
-   projectRaster(crs = crs(duke), method = "bilinear") %>%
-   projectRaster(dsm, method = "bilinear") %>%
-   crop(dsm)
-bare_earth <- bare_earth_ft * 0.3048
-
-# visualize canopy height and check for discrepancies
-dif = dsm - bare_earth
-#dif[dif<(-.5)] <- 100
-plot(dif)
 ```
-# Reading and checking 2008 lidar files
+# Read in and check 2008 lidar files
 Note: reprojected into UTM zone 18 in LAStools in QGIS.
 source for code: http://www.wvview.org/spatial_analytics/lidar/_site/index.html#lidar
 ```{r}
@@ -58,16 +44,19 @@ plot(las_cat, chunk_pattern = TRUE)
 ```{r}
 summary(las_cat)
 ```
-# Create 2008 digital terrain models ("bare earth")
+# Create & view 2008 digital terrain models ("bare earth")
 ```{r}
-opt_output_files(las_cat) <- "data/las_out/dtm_{XLEFT}_{YBOTTOM}"
-dtm2008 <- grid_terrain(las_cat, res = 1, knnidw(k = 10, p = 2), keep_lowest = FALSE) %>%
-   crop(extent(duke)+c(-250,250,-250,250))
-crs(dtm2008) <- crs(duke)
+# opt_output_files(las_cat) <- "data/dtm2008/dtm_{XLEFT}_{YBOTTOM}"
+# dtm2008 <-
+#    grid_terrain(las_cat,
+#                 res = 1,
+#                 knnidw(k = 10, p = 2),
+#                 keep_lowest = FALSE) %>%
+#    crop(y = (extent(duke) + c(-250, 250, -250, 250)))
+# crs(dtm2008) <- crs(duke)
 
-tm_shape(dtm2008)+
-tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
-tm_layout(legend.outside = TRUE)
+dtm2008 <- 
+  raster("data/dtm2008.tif") # to save time
 
 slope <- terrain(dtm2008, opt='slope')
 aspect <- terrain(dtm2008, opt='aspect')
@@ -76,16 +65,17 @@ hs <- hillShade(slope, aspect, angle=45, direction=315)
 tm_shape(hs)+
 tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
 tm_layout(legend.outside = TRUE)
-
-#writeRaster(dtm, "data/dtm2008.tif")
-dtm2008 <- raster("data/dtm2008.tif")
 ```
 # Create 2008 digital surface models ("bare earth + canopy height")
 ```{r}
-opt_output_files(las_cat) <- "data/dsm2008/dsm_{XLEFT}_{YBOTTOM}"
-dsm2008 <- grid_canopy(las_cat, res = 1, pitfree(c(0,2,5,10,15), c(0, 1))) %>%
-   crop(extent(duke)+c(-250,250,-250,250))
-crs(dsm2008) <- crs(duke)
+# opt_output_files(las_cat) <- "data/dsm2008/dsm_{XLEFT}_{YBOTTOM}"
+# dsm2008 <-
+#    grid_canopy(las_cat, res = 1, pitfree(c(0, 2, 5, 10, 15), c(0, 1))) %>%
+#    crop(extent(duke) + c(-250, 250, -250, 250))
+# crs(dsm2008) <- crs(duke)
+
+dsm2008 <- 
+   raster("data/dsm2008.tif") # to save time
 
 slope <- terrain(dsm2008, opt='slope')
 aspect <- terrain(dsm2008, opt='aspect')
@@ -94,27 +84,11 @@ hs <- hillShade(slope, aspect, angle=45, direction=315)
 tm_shape(hs)+
 tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
 tm_layout(legend.outside = TRUE)
-
-# writeRaster(dsm2008, "data/dsm2008.tif")
-dsm2008 <- raster("data/dsm2008.tif")
 ```
-
 ```{r}
-plot(dsm2008); plot(st_geometry(duke), add = T)
-```
+dtm2008_plus_eye <- dtm2008 + 1.61 # the height of Mike's eyes
 
-```{r}
-
-bare_earth_plus_eye <- bare_earth + 1.61 # the height of Mike's eyes
-
-dsm.eye <- max(bare_earth_plus_eye, dsm.fix)
-plot(dsm.eye)
-
-#writeRaster(dsm.eye, "data/dsm.eye.tif")
-
-tm_shape(ndsm)+
-tm_raster(style= "quantile", n=7, palette=get_brewer_pal("Greens", n=7, plot=FALSE))+
-tm_layout(legend.outside = TRUE)
+dsm.eye <- max(dtm2008_plus_eye, dsm2008)
 
 # next: 
 #   5) run r.horizon every 5 degrees in GRASS GUI 
@@ -125,9 +99,8 @@ tm_layout(legend.outside = TRUE)
 # Map mean horizon heights from all angles
 Note: I used GRASS for this via the program's user interface.
 ```{r}
-horizon_mean <- raster("data/horizon_10_mean.tif") %>%
-   mask(duke.pred)
-horizon_mean_rad <- (horizon_mean*(pi/180))/0.0174533
+horizon_mean <- raster("data/horizon/horizon_10_mean.tif") %>%
+   mask(duke)
 plot(horizon_mean, col = viridis::inferno(256), zlim = c(0,30))
 ```
 
@@ -136,16 +109,7 @@ plot(horizon_mean, col = viridis::inferno(256), zlim = c(0,30))
 
 
 
-
-
-
-
-
-
-
-
-# To change raster regions manually
-e.g., to remove tree lines
+# To change raster regions manually, e.g., to remove tree lines
 ```{r}
 
 boxes = rbind.data.frame(
