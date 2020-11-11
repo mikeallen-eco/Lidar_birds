@@ -9,183 +9,185 @@ output: html_document
 library(raster)
 library(rgdal)
 library(sp)
+library(sf)
 library(tidyverse)
-library(rgrass7)
-library(RQGIS3)
+library(lidR)
+library(tmap)
+library(tmaptools)
+```
+# Read in shapefiles
+```{r}
+# read in duke field borders
+duke <- 
+   read_sf("data/duke_GL_pred_areas.shp") %>%
+   st_transform(crs = 32618)
+
+# load in dsm created in LASTools
+dsm1 <- 
+   raster("data/final_duke_dsm.tif")
+dsm <- 
+   crop(dsm1, extent(duke)+c(-250,250,-250,250))
+
+fix = read.csv("data/pixels_to_fix.csv") %>%
+   mutate(x = E + 0.5, 
+          y = formatC(N + 0.5, digits = 1, format = "f"),
+          keyx = as.character(x),
+          keyy = as.character(y))
+
+boxes = rbind.data.frame(
+expand.grid(y = c(7776:7806), x = c(8480:8500), new = 31.6),
+expand.grid(y = c(7807:7844), x = c(8483:8503), new = 32.3),
+expand.grid(y = c(7850:7902), x = c(8492:8512), new = 33.5),
+expand.grid(y = c(7910:7980), x = c(8495:8530), new = 34.7),
+expand.grid(y = c(7980:8033), x = c(8512:8642), new = 34.6),
+expand.grid(y = c(7988:8022), x = c(8642:8712), new = 34.1),
+expand.grid(y = c(8033:8119), x = c(8515:8549), new = 33.5),
+expand.grid(y = c(8122:8164), x = c(8530:8554), new = 32.2)
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8), 
+          x = x + 520000.5,
+          keyx = as.character(x),
+          keyy = as.character(y))
+
+bare_earth_ft <-
+   raster("data/bare_earth_2018.tif") %>%
+   projectRaster(crs = crs(duke), method = "bilinear") %>%
+   projectRaster(dsm, method = "bilinear") %>%
+   crop(dsm)
+bare_earth <- bare_earth_ft * 0.3048
+
+# visualize canopy height and check for discrepancies
+dif = dsm - bare_earth
+#dif[dif<(-.5)] <- 100
+plot(dif)
+```
+# Reading and checking 2008 lidar files
+Note: reprojected into UTM zone 18 in LAStools in QGIS.
+source for code: http://www.wvview.org/spatial_analytics/lidar/_site/index.html#lidar
+```{r}
+las_cat <- readLAScatalog("data/lidar2008_utm/")
+projection(las_cat) <- crs(32618)
+summary(las_cat)
+
+lascheck(las_cat)
+```
+# Choose scale to process 2008 lidar files
+```{r}
+opt_chunk_size(las_cat) <- 2000
+plot(las_cat, chunk_pattern = TRUE)
+
+opt_chunk_buffer(las_cat) <- 40
+plot(las_cat, chunk_pattern = TRUE)
+```
+# View summary of 2008 lidar files
+```{r}
+summary(las_cat)
+```
+# Create 2008 digital terrain models ("bare earth")
+```{r}
+opt_output_files(las_cat) <- "data/las_out/dtm_{XLEFT}_{YBOTTOM}"
+dtm2008 <- grid_terrain(las_cat, res = 1, knnidw(k = 10, p = 2), keep_lowest = FALSE) %>%
+   crop(extent(duke)+c(-250,250,-250,250))
+crs(dtm2008) <- crs(duke)
+
+tm_shape(dtm2008)+
+tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+
+slope <- terrain(dtm2008, opt='slope')
+aspect <- terrain(dtm2008, opt='aspect')
+hs <- hillShade(slope, aspect, angle=45, direction=315)
+
+tm_shape(hs)+
+tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+
+#writeRaster(dtm, "data/dtm2008.tif")
+dtm2008 <- raster("data/dtm2008.tif")
+```
+# Create 2008 digital surface models ("bare earth + canopy height")
+```{r}
+opt_output_files(las_cat) <- "data/dsm2008/dsm_{XLEFT}_{YBOTTOM}"
+dsm2008 <- grid_canopy(las_cat, res = 1, pitfree(c(0,2,5,10,15), c(0, 1))) %>%
+   crop(extent(duke)+c(-250,250,-250,250))
+crs(dsm2008) <- crs(duke)
+
+slope <- terrain(dsm2008, opt='slope')
+aspect <- terrain(dsm2008, opt='aspect')
+hs <- hillShade(slope, aspect, angle=45, direction=315)
+
+tm_shape(hs)+
+tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+
+# writeRaster(dsm2008, "data/dsm2008.tif")
+dsm2008 <- raster("data/dsm2008.tif")
+```
+
+```{r}
+plot(dsm2008); plot(st_geometry(duke), add = T)
+```
+
+```{r}
+dp = rasterToPoints(dsm) %>%
+   data.frame() %>%
+   mutate(y = formatC(y, digits = 1, format = "f"),
+          keyx = as.character(x),
+          keyy = as.character(y)) %>%
+   left_join(fix, by = c("x", "y", "keyx", "keyy")) %>%
+   mutate(value.final = case_when(is.na(new) ~ final_duke_dsm,
+                                  TRUE ~ new)) %>%
+   dplyr::select(x, y, keyx, keyy, value.final) %>%
+   left_join(boxes, by = c("x", "y", "keyx", "keyy")) %>%
+   mutate(value.final2 = case_when(is.na(new) ~ value.final,
+                                  TRUE ~ new)) %>%
+   dplyr::select(x, y, value.final2) %>%
+   mutate(y = as.numeric(y))
+```
+
+# Make a raster with the corrected elevation values
+```{r}
+# get values
+vals <- 
+   dp$value.final2
+
+# make the new raster with treelines and artifacts removed
+dsm.fix <- dsm %>%
+   setValues(vals)
+
+#writeRaster(dsm.fix, "data/duke_dsm_fixed.tif")
 ```
 
 ```{r}
 
-# note: digital surface models were created from 6 lidar file 
-#       used LASTools "blast2dem", which is why there is a black diagonal line in some
-dem1<-raster("data/dem1.tif")
-dem2<-raster("data/dem2.tif")
-dem3<-raster("data/dem3.tif")
-dem4<-raster("data/dem4.tif")
-dem5<-raster("data/dem5.tif")
-dem6<-raster("data/dem6.tif")
+bare_earth_plus_eye <- bare_earth + 1.61 # the height of Mike's eyes
 
-# merge the DEMs into one big one
-x <- list(dem1, dem2, dem3, dem4, dem5, dem6)
-#names(x) <- c("x", "y")
-#x$filename <- 'test.tif'
-x$overwrite <- TRUE
-m <- do.call(merge, x)
+dsm.eye <- max(bare_earth_plus_eye, dsm.fix)
+plot(dsm.eye)
 
-duke.geo<-readOGR("data","duke_studyareas")
-duke = spTransform(duke.geo, crs(dem1))
+#writeRaster(dsm.eye, "data/dsm.eye.tif")
 
+tm_shape(ndsm)+
+tm_raster(style= "quantile", n=7, palette=get_brewer_pal("Greens", n=7, plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+
+# next: 
+#   5) run r.horizon every 5 degrees in GRASS GUI 
+#   6) make raster of max & mean (use r.series in GRASS GUI)
+#   7)  test as covariate for psi
 ```
 
+# Map mean horizon heights from all angles
+Note: I used GRASS for this via the program's user interface.
 ```{r}
-plot(m)
-plot(duke, bg="transparent", add=TRUE)
-```
-```{r}
-
-writeRaster(m, "")
-
-r <- writeRaster(m, filename=file.path(paste0(getwd(),"/data"), "m.tif"), format="GTiff", overwrite=TRUE)
-r2<-raster("data/m.tif")
-
-proj4string(r2)
+horizon_mean <- raster("data/horizon_10_mean.tif") %>%
+   mask(duke.pred)
+horizon_mean_rad <- (horizon_mean*(pi/180))/0.0174533
+plot(horizon_mean, col = viridis::inferno(256), zlim = c(0,30))
 ```
 
 
-```{r}
-
-# setup a temp workingdir
-working.dir<- "~/tmp/"
-
-# get meuse data
-
-data(meuse)
-data(meuse.grid)
-
-# georeference the meuse grid data
-coordinates(meuse.grid) <- ~x+y
-proj4string(meuse.grid) <- CRS("+init=epsg:28992")
-gridded(meuse.grid) <- TRUE
-
-# get a first cellsize/pixel resolution for GRASS
-resolution <- meuse.grid at grid@cellsize[1]
-
-# georeference the meuse data
-coordinates(meuse) <- ~x+y
-proj4string(meuse) <- as.character(CRS("+init=epsg:28992"))
-
-# get projection, proj4 string and extent for GRASS
-projection<-(strsplit(meuse at proj4string@projargs,split = " "))
-proj4<- paste(projection[[1]][2:length(unlist(projection))], collapse = ' ')
-xmax<-meuse at bbox[3]
-xmin<-meuse at bbox[1]
-ymax<-meuse at bbox[4]
-ymin<-meuse@@bbox[2]
-
-# create and set working directory
-if (!file.exists(file.path(working.dir,"run"))){
-   dir.create(file.path(working.dir,"run"),recursive = TRUE)
-}
-setwd(file.path( working.dir,"run"))
-
-
-############ set up GRASS RUNTIME environment
-
-# define the GRASS executable path
-if(Sys.info()["sysname"] == "Windows"){
-   grass.gis.base<-'C:/OSGeo4W64/apps/grass/grass-7.0.5'
-}else {
-   grass.gis.base<-'/usr/lib/grass72'
-}
-
-# set path for optional GRASS addons
-Sys.setenv(GRASS_ADDON_PATH="~/.grass7/addons")
-
-# create the TEMPORARY GRASS location
-rgrass7::initGRASS(gisBase=grass.gis.base,
-                    home=tempdir(),
-                    mapset='PERMANENT',
-                    override=TRUE
-)
-
-# assign GRASS projection according to data set
-rgrass7::execGRASS('g.proj',
-                    flags=c('c','quiet'),
-                    proj4=proj4
-)
-
-# assign GRASS extent and resolution
-rgrass7::execGRASS('g.region',
-                    flags=c('quiet'),
-                    n=as.character(ymax),
-                    s=as.character(ymin),
-                    e=as.character(xmax),
-                    w=as.character(xmin),
-                    res=as.character(resolution)
-)
-
-
-#############   now do GRASS STUFF
-
-writeVECT(meuse,"meuse")
-execGRASS("v.db.addcolumn", map = "meuse", columns = "area_m2 double
-precision")
-
-
-```
-
-
-```{r}
-
-setwd(".") # Working directory 
-
-# Set on-disk raster variable
-rname <- paste(getwd(), "data/", sep="/")
-
-# Set GRASS environment and database location 
-loc <- initGRASS(gisBase = "C:/OSGeo4W/apps/grass/grass78", 
-       home="C:/Users/Mike/Documents/GIS DataBase", gisDbase="C:/Users/Mike/Documents/GIS DataBase", override=T)
-
-# Import raster to GRASS and set region
-execGRASS("r.in.gdal", flags="o", parameters=list(input=m, output="tmprast"))
-execGRASS("g.region", parameters=list(raster="tmprast") ) 
-
-# Calculate 9x9 focal mean 
-execGRASS("r.neighbors", flags="overwrite", parameters=list(input="tmprast", output="xxfm", 
-          method="average", size=as.integer(9)) )
-
-r <- readRAST("xxfm")
-  spplot(r)
-```
-
-```{r}
-# download German administrative areas 
-ger = getData(name = "GADM", country = "DEU", level = 1)
-# ger is of class "SpatialPolygonsDataFrame"
-
-# set the environment, i.e. specify all the paths necessary to run QGIS from 
-# within R
-set_env()
-# under Windows set_env would be much faster if you specify the root path:
-# set_env("C:/OSGeo4W~1")
-
-RQGIS3::open_app()
-
-RQGIS3::find_algorithms(search_term = "horizon", name_only = TRUE)
-
-get_usage(alg = "grass7:r.horizon")
-
-
-params$INPUT = m
-params$OUTPUT = file.path(tempdir(), "ger_coords.shp")
-out = run_qgis(alg = "native:centroids",
-               params = params,
-               load_output = TRUE)
-#>$OUTPUT
-#>[1] "/tmp/RtmpC6SKby/ger_coords.shp"
-
-
-elevation = m, step = 1, start = 0, end = 359, maxdistance = 1000, d = 
-
-```
 
