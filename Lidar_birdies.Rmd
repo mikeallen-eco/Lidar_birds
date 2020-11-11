@@ -22,27 +22,49 @@ duke <-
    read_sf("data/duke_GL_pred_areas.shp") %>%
    st_transform(crs = 32618)
 ```
+# Read in and check 2018 lidar files
+Note: reprojected from NJ state plane (NAD83) into UTM zone 18 in LAStools in QGIS.
+source for all lidR code used: http://www.wvview.org/spatial_analytics/lidar/_site/index.html#lidar
+```{r}
+las_cat18 <- readLAScatalog("data/lidar2018/")
+projection(las_cat18) <- crs(6527) # state plane nad83(2011) in US feet
+summary(las_cat18)
+
+lascheck(las_cat18)
+```
 # Read in and check 2008 lidar files
-Note: reprojected into UTM zone 18 in LAStools in QGIS.
+Note: reprojected from long/lat into UTM zone 18 in LAStools in QGIS.
 source for code: http://www.wvview.org/spatial_analytics/lidar/_site/index.html#lidar
 ```{r}
-las_cat <- readLAScatalog("data/lidar2008_utm/")
-projection(las_cat) <- crs(32618)
-summary(las_cat)
+#las_cat <- readLAScatalog("data/lidar2008/")
+#projection(las_cat) <- crs(32618) # utm
+#summary(las_cat)
 
-lascheck(las_cat)
+#lascheck(las_cat)
+```
+# Choose scale to process 2018 lidar files
+```{r}
+opt_chunk_size(las_cat18) <- 5100
+plot(las_cat18, chunk_pattern = TRUE)
+
+opt_chunk_buffer(las_cat18) <- 100
+plot(las_cat18, chunk_pattern = TRUE)
 ```
 # Choose scale to process 2008 lidar files
 ```{r}
-opt_chunk_size(las_cat) <- 2000
-plot(las_cat, chunk_pattern = TRUE)
+#opt_chunk_size(las_cat) <- 2000
+#plot(las_cat, chunk_pattern = TRUE)
 
-opt_chunk_buffer(las_cat) <- 40
-plot(las_cat, chunk_pattern = TRUE)
+#opt_chunk_buffer(las_cat) <- 40
+#plot(las_cat, chunk_pattern = TRUE)
+```
+# View summary of 2018 lidar files
+```{r}
+summary(las_cat18)
 ```
 # View summary of 2008 lidar files
 ```{r}
-summary(las_cat)
+#summary(las_cat)
 ```
 # Create & view 2008 digital terrain models ("bare earth")
 ```{r}
@@ -66,7 +88,37 @@ tm_shape(hs)+
 tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
 tm_layout(legend.outside = TRUE)
 ```
-# Create 2008 digital surface models ("bare earth + canopy height")
+# Create & view 2018 digital terrain models ("bare earth")
+```{r}
+# opt_output_files(las_cat18) <- "data/dtm2018/dtm_{XLEFT}_{YBOTTOM}"
+# dtm2018_step1 <-
+#    grid_terrain(las_cat18,
+#                 res = 3.28084,
+#                 knnidw(k = 10, p = 2),
+#                 keep_lowest = FALSE)
+# 
+# crs(dtm2018_step1) <-
+#    CRS("+init=epsg:6527") # nj state plane nad83 (2011), grs80 in US feet
+# 
+# dtm2018 <-
+#    projectRaster(from = dtm2018_step1,
+#                  to = dtm2008) 
+#
+# dtm2018 <- dtm2018 / 3.28084
+
+dtm2018 <-
+   raster("data/dtm2018.tif") # to save time
+
+slope <- terrain(dtm2018, opt='slope')
+aspect <- terrain(dtm2018, opt='aspect')
+hs <- hillShade(slope, aspect, angle=45, direction=315)
+
+tm_shape(hs)+
+tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+```
+
+# Create 2008 digital surface models (i.e., "bare earth + canopy height")
 ```{r}
 # opt_output_files(las_cat) <- "data/dsm2008/dsm_{XLEFT}_{YBOTTOM}"
 # dsm2008 <-
@@ -85,10 +137,94 @@ tm_shape(hs)+
 tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
 tm_layout(legend.outside = TRUE)
 ```
+# Create 2018 digital surface models (i.e., "bare earth + canopy height")
 ```{r}
-dtm2008_plus_eye <- dtm2008 + 1.61 # the height of Mike's eyes
+ # opt_output_files(las_cat18) <- "data/dsm2018/dsm_{XLEFT}_{YBOTTOM}"
+ # dsm2018_step1 <-
+ #    grid_canopy(las_cat18, res = 3.28084, pitfree(c(0, 2, 5, 10, 15), c(0, 1))) 
+ # 
+ # dsm2018_step1[dsm2018_step1>300] <- NA # remove elevation outliers
+ # 
+ # crs(dsm2018_step1) <-
+ #    CRS("+init=epsg:6527") # nj state plane nad83 (2011), grs80 in US feet
+ # 
+ # dsm2018 <-
+ #    projectRaster(from = dsm2018_step1,
+ #                  to = dsm2008) 
+ # 
+ # dsm2018 <- dsm2018 / 3.28084
+ 
+dsm2018 <- 
+   raster("data/dsm2018.tif") # to save time
 
-dsm.eye <- max(dtm2008_plus_eye, dsm2008)
+slope <- terrain(dsm2018, opt='slope')
+aspect <- terrain(dsm2018, opt='aspect')
+hs <- hillShade(slope, aspect, angle=45, direction=315)
+
+tm_shape(hs)+
+tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+```
+
+
+```{r}
+# remove a tree line that was removed in 2018 after lidar but before survey
+# make 4 boxes to "cut down" the tree line
+boxes2018 = rbind.data.frame(
+   expand.grid(
+      y = c(7470:7610),
+      x = c(8635:8681),
+      new = 30.5
+   ),
+   expand.grid(
+      y = c(7408:7465),
+      x = c(8627:8661),
+      new = 29.5
+   ),
+   expand.grid(
+      y = c(7352:7410),
+      x = c(8619:8649),
+      new = 27.5
+   ),
+   expand.grid(
+      y = c(7302:7354),
+      x = c(8616:8646),
+      new = 25.5
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.newVals_step1 <- dsm2018
+dsm2018.newVals_step1[is.na(dsm2018.newVals_step1)] <- 0
+dsm2018.newVals <- rasterToPoints(dsm2018.newVals_step1) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.fix <- dsm2018 %>%
+   setValues(dsm2018.newVals[,3])
+
+# writeRaster(dsm2018.fix, "data/dsm2018.fix.tif", overwrite = T)
+
+dtm2008_plus_eye <- dtm2008 + 1.61 # the height of Mike's eyes
+dtm2018_plus_eye <- dtm2018 + 1.61 # the height of Mike's eyes
+
+dsm.eye2008 <- max(dtm2008_plus_eye, dsm2008)
+dsm.eye2018 <- max(dtm2018_plus_eye, dsm2018)
+dsm.eye2018.fix <- max(dtm2018_plus_eye, dsm2018.fix)
+
+#writeRaster(dsm.eye2008, "data/dsm.eye2008.tif", overwrite = T)
+#writeRaster(dsm.eye2018, "data/dsm.eye2018.tif", overwrite = T)
+#writeRaster(dsm.eye2018.fix, "data/dsm.eye2018.fix.tif", overwrite = T)
 
 # next: 
 #   5) run r.horizon every 5 degrees in GRASS GUI 
@@ -111,7 +247,6 @@ plot(log(horizon_mean), col = viridis::inferno(256))
 
 # To change raster regions manually, e.g., to remove tree lines
 ```{r}
-
 boxes = rbind.data.frame(
 expand.grid(y = c(7776:7806), x = c(8480:8500), new = 31.6),
 expand.grid(y = c(7807:7844), x = c(8483:8503), new = 32.3),
