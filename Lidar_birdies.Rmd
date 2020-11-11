@@ -14,6 +14,7 @@ library(tidyverse)
 library(lidR)
 library(tmap)
 library(tmaptools)
+library(lubridate)
 ```
 # Read in shapefiles
 ```{r}
@@ -240,55 +241,125 @@ horizon_mean <- raster("data/horizon/horizon_10_mean.tif") %>%
 plot(log(horizon_mean), col = viridis::inferno(256))
 ```
 
-
-
-
-
-
-# To change raster regions manually, e.g., to remove tree lines
+# Formatting bird data for occupancy modelling
 ```{r}
-boxes = rbind.data.frame(
-expand.grid(y = c(7776:7806), x = c(8480:8500), new = 31.6),
-expand.grid(y = c(7807:7844), x = c(8483:8503), new = 32.3),
-expand.grid(y = c(7850:7902), x = c(8492:8512), new = 33.5),
-expand.grid(y = c(7910:7980), x = c(8495:8530), new = 34.7),
-expand.grid(y = c(7980:8033), x = c(8512:8642), new = 34.6),
-expand.grid(y = c(7988:8022), x = c(8642:8712), new = 34.1),
-expand.grid(y = c(8033:8119), x = c(8515:8549), new = 33.5),
-expand.grid(y = c(8122:8164), x = c(8530:8554), new = 32.2)
-) %>%
-   group_by(y, x) %>%
-   summarise(new = mean(new)) %>%
-   ungroup() %>%
-   mutate(y = format(y + 4480000.5, digits = 8), 
-          x = x + 520000.5,
-          keyx = as.character(x),
-          keyy = as.character(y))
+d = read.csv("data/dukebirds2018-2019.QCed.2019-11-20.csv") %>%
+   dplyr::select(
+      obs,
+      date,
+      year,
+      fld,
+      per,
+      pt,
+      start,
+      sp,
+      num,
+      dist,
+      az,
+      detect,
+      sex,
+      voc,
+      lon = pt.lon,
+      lat = pt.lat
+   ) %>%
+   st_as_sf(coords = c("lon", "lat"), crs = crs(dsm2008)) %>%
+   st_transform(crs = crs(dtm2008)) %>%
+   mutate(r.date = mdy(date)) %>%
+   mutate(ord = yday(r.date)) %>%
+   mutate(month = month(r.date)) %>%
+   mutate(
+      dist3 = ifelse(sp == "GRSP" & is.na(dist) == T, 55, dist),
+      dist4 = ifelse(sp == "BOBO" & is.na(dist) == T, 56, dist3),
+      dist5 = ifelse(sp == "EAME" & is.na(dist) == T, 77, dist4),
+      dist = ifelse(sp == "RWBL" & is.na(dist) == T, 57, dist5),
+      az = ifelse(is.na(az) == T, runif(1, 0, 360), az)
+   ) %>%
+   select(-dist3,-dist4,-dist5) %>%
+   mutate(
+      hour = case_when(substr(start, 1, 1) == 1 ~ 10,
+                       TRUE ~ as.numeric(substr(start, 1, 1))),
+      min = case_when(substr(start, 1, 1) == 1 ~ 0,
+                      TRUE ~ as.numeric(substr(start, 3, 4))),
+      dtime = hour + min / 60
+   )
+#### NOTE RE MISSING DISTANCE DATA ####
+# several GRSP and some other "hard to spot" species had dist and / or az left blank
+# all of these records were believed to be within 100 m
+# for mapping purposes, we will assume an average distance (by species) and random azimuth
 
-dp = rasterToPoints(dsm) %>%
-   data.frame() %>%
-   mutate(y = formatC(y, digits = 1, format = "f"),
-          keyx = as.character(x),
-          keyy = as.character(y)) %>%
-   left_join(fix, by = c("x", "y", "keyx", "keyy")) %>%
-   mutate(value.final = case_when(is.na(new) ~ final_duke_dsm,
-                                  TRUE ~ new)) %>%
-   dplyr::select(x, y, keyx, keyy, value.final) %>%
-   left_join(boxes, by = c("x", "y", "keyx", "keyy")) %>%
-   mutate(value.final2 = case_when(is.na(new) ~ value.final,
-                                  TRUE ~ new)) %>%
-   dplyr::select(x, y, value.final2) %>%
-   mutate(y = as.numeric(y))
+pt.per.list <- d %>%
+   as.data.frame() %>%
+   dplyr::select(year, pt, per) %>%
+   distinct() %>%
+   arrange(year, pt, per)
 
-# get values
-vals <- 
-   dp$value.final2
+d.occ.long <- d %>%
+   as.data.frame() %>%
+   mutate(pres = case_when(num>0 & dist<75 ~ 1,
+                           TRUE ~ 0)) %>%
+   dplyr::select(year, pt, per, sp, pres, ord, dtime) %>%
+   group_by(year, pt, per, sp, ord, dtime) %>%
+   summarise(pres = max(pres)) %>%
+   ungroup()
+   
+g.occ <-
+   d.occ.long %>%
+   filter(sp == "GRSP") %>%
+   right_join(pt.per.list, by = c("year", "pt", "per")) %>%
+   mutate(pres = case_when(is.na(sp)==T ~ 0,
+                           TRUE ~ pres)) %>%
+   arrange(year, pt, per) %>%
+   mutate(survey = case_when(per %in% c(1,2) ~ 1,
+                             per %in% c(3,4) ~ 2, 
+                             per %in% c(5,6) ~ 3,
+                             per %in% c(7,8) ~ 4)) %>%
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres)
 
-# make the new raster with treelines and artifacts removed
-dsm.fix <- dsm %>%
-   setValues(vals)
+b.occ <-
+   d.occ.long %>%
+   filter(sp == "BOBO") %>%
+   right_join(pt.per.list, by = c("year", "pt", "per")) %>%
+   mutate(pres = case_when(is.na(sp)==T ~ 0,
+                           TRUE ~ pres)) %>%
+   arrange(year, pt, per) %>%
+   mutate(survey = case_when(per %in% c(1,2) ~ 1,
+                             per %in% c(3,4) ~ 2, 
+                             per %in% c(5,6) ~ 3,
+                             per %in% c(7,8) ~ 4)) %>%
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres)
 
-#writeRaster(dsm.fix, "data/duke_dsm_fixed.tif")
+e.occ <-
+   d.occ.long %>%
+   filter(sp == "EAME") %>%
+   right_join(pt.per.list, by = c("year", "pt", "per")) %>%
+   mutate(pres = case_when(is.na(sp)==T ~ 0,
+                           TRUE ~ pres)) %>%
+   arrange(year, pt, per) %>%
+   mutate(survey = case_when(per %in% c(1,2) ~ 1,
+                             per %in% c(3,4) ~ 2, 
+                             per %in% c(5,6) ~ 3,
+                             per %in% c(7,8) ~ 4)) %>%
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres)
+
+survey.ord <-
+   d.occ.long %>%
+   distinct(year, pt, per, ord) %>%
+   arrange(year, pt, per) %>%
+   mutate(survey = case_when(per %in% c(1,2) ~ 1,
+                             per %in% c(3,4) ~ 2, 
+                             per %in% c(5,6) ~ 3,
+                             per %in% c(7,8) ~ 4)) %>%
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = ord)
+
+survey.dtime <-
+   d.occ.long %>%
+   distinct(year, pt, per, dtime) %>%
+   arrange(year, pt, per) %>%
+   mutate(survey = case_when(per %in% c(1,2) ~ 1,
+                             per %in% c(3,4) ~ 2, 
+                             per %in% c(5,6) ~ 3,
+                             per %in% c(7,8) ~ 4)) %>%
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = dtime)
 ```
 
 
