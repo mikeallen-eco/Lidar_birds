@@ -97,11 +97,11 @@ dsm.eye <- max(dtm2008_plus_eye, dsm2008)
 ```
 
 # Map mean horizon heights from all angles
-Note: I used GRASS for this via the program's user interface.
+Note: I used GRASS GUI (r.horizon & r.series functions) to make the horizon rasters. Mean or max of 72 height-of-horizon measurements around each cell.
 ```{r}
 horizon_mean <- raster("data/horizon/horizon_10_mean.tif") %>%
    mask(duke)
-plot(horizon_mean, col = viridis::inferno(256), zlim = c(0,30))
+plot(log(horizon_mean), col = viridis::inferno(256))
 ```
 
 
