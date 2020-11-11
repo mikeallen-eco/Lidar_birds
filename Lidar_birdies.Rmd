@@ -1,7 +1,7 @@
 ---
 title: "Lidar Birdies"
 author: "Mike Allen"
-date: "5/16/2020"
+date: "11/10/2020"
 output: html_document
 ---
 
@@ -22,35 +22,7 @@ duke <-
    read_sf("data/duke_GL_pred_areas.shp") %>%
    st_transform(crs = 32618)
 
-# load in dsm created in LASTools
-dsm1 <- 
-   raster("data/final_duke_dsm.tif")
-dsm <- 
-   crop(dsm1, extent(duke)+c(-250,250,-250,250))
 
-fix = read.csv("data/pixels_to_fix.csv") %>%
-   mutate(x = E + 0.5, 
-          y = formatC(N + 0.5, digits = 1, format = "f"),
-          keyx = as.character(x),
-          keyy = as.character(y))
-
-boxes = rbind.data.frame(
-expand.grid(y = c(7776:7806), x = c(8480:8500), new = 31.6),
-expand.grid(y = c(7807:7844), x = c(8483:8503), new = 32.3),
-expand.grid(y = c(7850:7902), x = c(8492:8512), new = 33.5),
-expand.grid(y = c(7910:7980), x = c(8495:8530), new = 34.7),
-expand.grid(y = c(7980:8033), x = c(8512:8642), new = 34.6),
-expand.grid(y = c(7988:8022), x = c(8642:8712), new = 34.1),
-expand.grid(y = c(8033:8119), x = c(8515:8549), new = 33.5),
-expand.grid(y = c(8122:8164), x = c(8530:8554), new = 32.2)
-) %>%
-   group_by(y, x) %>%
-   summarise(new = mean(new)) %>%
-   ungroup() %>%
-   mutate(y = format(y + 4480000.5, digits = 8), 
-          x = x + 520000.5,
-          keyx = as.character(x),
-          keyy = as.character(y))
 
 bare_earth_ft <-
    raster("data/bare_earth_2018.tif") %>%
@@ -132,36 +104,6 @@ plot(dsm2008); plot(st_geometry(duke), add = T)
 ```
 
 ```{r}
-dp = rasterToPoints(dsm) %>%
-   data.frame() %>%
-   mutate(y = formatC(y, digits = 1, format = "f"),
-          keyx = as.character(x),
-          keyy = as.character(y)) %>%
-   left_join(fix, by = c("x", "y", "keyx", "keyy")) %>%
-   mutate(value.final = case_when(is.na(new) ~ final_duke_dsm,
-                                  TRUE ~ new)) %>%
-   dplyr::select(x, y, keyx, keyy, value.final) %>%
-   left_join(boxes, by = c("x", "y", "keyx", "keyy")) %>%
-   mutate(value.final2 = case_when(is.na(new) ~ value.final,
-                                  TRUE ~ new)) %>%
-   dplyr::select(x, y, value.final2) %>%
-   mutate(y = as.numeric(y))
-```
-
-# Make a raster with the corrected elevation values
-```{r}
-# get values
-vals <- 
-   dp$value.final2
-
-# make the new raster with treelines and artifacts removed
-dsm.fix <- dsm %>%
-   setValues(vals)
-
-#writeRaster(dsm.fix, "data/duke_dsm_fixed.tif")
-```
-
-```{r}
 
 bare_earth_plus_eye <- bare_earth + 1.61 # the height of Mike's eyes
 
@@ -189,5 +131,65 @@ horizon_mean_rad <- (horizon_mean*(pi/180))/0.0174533
 plot(horizon_mean, col = viridis::inferno(256), zlim = c(0,30))
 ```
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+# To change raster regions manually
+e.g., to remove tree lines
+```{r}
+
+boxes = rbind.data.frame(
+expand.grid(y = c(7776:7806), x = c(8480:8500), new = 31.6),
+expand.grid(y = c(7807:7844), x = c(8483:8503), new = 32.3),
+expand.grid(y = c(7850:7902), x = c(8492:8512), new = 33.5),
+expand.grid(y = c(7910:7980), x = c(8495:8530), new = 34.7),
+expand.grid(y = c(7980:8033), x = c(8512:8642), new = 34.6),
+expand.grid(y = c(7988:8022), x = c(8642:8712), new = 34.1),
+expand.grid(y = c(8033:8119), x = c(8515:8549), new = 33.5),
+expand.grid(y = c(8122:8164), x = c(8530:8554), new = 32.2)
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8), 
+          x = x + 520000.5,
+          keyx = as.character(x),
+          keyy = as.character(y))
+
+dp = rasterToPoints(dsm) %>%
+   data.frame() %>%
+   mutate(y = formatC(y, digits = 1, format = "f"),
+          keyx = as.character(x),
+          keyy = as.character(y)) %>%
+   left_join(fix, by = c("x", "y", "keyx", "keyy")) %>%
+   mutate(value.final = case_when(is.na(new) ~ final_duke_dsm,
+                                  TRUE ~ new)) %>%
+   dplyr::select(x, y, keyx, keyy, value.final) %>%
+   left_join(boxes, by = c("x", "y", "keyx", "keyy")) %>%
+   mutate(value.final2 = case_when(is.na(new) ~ value.final,
+                                  TRUE ~ new)) %>%
+   dplyr::select(x, y, value.final2) %>%
+   mutate(y = as.numeric(y))
+
+# get values
+vals <- 
+   dp$value.final2
+
+# make the new raster with treelines and artifacts removed
+dsm.fix <- dsm %>%
+   setValues(vals)
+
+#writeRaster(dsm.fix, "data/duke_dsm_fixed.tif")
+```
 
 
