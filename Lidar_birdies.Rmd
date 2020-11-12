@@ -236,9 +236,11 @@ dsm.eye2018.fix <- max(dtm2018_plus_eye, dsm2018.fix)
 # Map mean horizon heights from all angles
 Note: I used GRASS GUI (r.horizon & r.series functions) to make the horizon rasters. Mean or max of 72 height-of-horizon measurements around each cell.
 ```{r}
-horizon_mean <- raster("data/horizon/horizon_10_mean.tif") %>%
-   mask(duke)
-plot(log(horizon_mean), col = viridis::inferno(256))
+horizon2018_mean <- raster("data/horizon2018fix_mean_5.tif") 
+horizon2018_max <- raster("data/horizon2018fix_max_5.tif") 
+
+plot(log(mask(horizon2018_mean, duke)), col = viridis::inferno(256)); plot(log(mask(horizon2018_max, duke)), col = viridis::inferno(256))
+
 ```
 
 # Formatting bird data for occupancy modelling
@@ -262,7 +264,7 @@ d = read.csv("data/dukebirds2018-2019.QCed.2019-11-20.csv") %>%
       lon = pt.lon,
       lat = pt.lat
    ) %>%
-   st_as_sf(coords = c("lon", "lat"), crs = crs(dsm2008)) %>%
+   st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
    st_transform(crs = crs(dtm2008)) %>%
    mutate(r.date = mdy(date)) %>%
    mutate(ord = yday(r.date)) %>%
@@ -360,6 +362,18 @@ survey.dtime <-
                              per %in% c(5,6) ~ 3,
                              per %in% c(7,8) ~ 4)) %>%
    pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = dtime)
+
+d.extract <- d %>% 
+   dplyr::select(pt) %>%
+   distinct(pt) 
+
+
+site.cov <- cbind.data.frame(pt = as.data.frame(d.extract)$pt, 
+                             mean = raster::extract(horizon2018_mean, d.extract),
+                             max = raster::extract(horizon2018_max, d.extract)) %>%
+   left_join(g.occ, by = "pt") %>%
+   arrange(year, pt) %>%
+   dplyr::select(year, pt, mean, max)
 ```
 
 
