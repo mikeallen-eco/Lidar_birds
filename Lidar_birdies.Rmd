@@ -239,7 +239,7 @@ Note: I used GRASS GUI (r.horizon & r.series functions) to make the horizon rast
 horizon2018_mean <- raster("data/horizon2018fix_mean_5.tif") 
 horizon2018_max <- raster("data/horizon2018fix_max_5.tif") 
 
-plot(log(mask(horizon2018_mean, duke)), col = viridis::inferno(256)); plot(log(mask(horizon2018_max, duke)), col = viridis::inferno(256))
+plot((90-mask(horizon2018_mean, duke)), col = viridis::inferno(256)); plot((90-mask(horizon2018_max, duke)), col = viridis::viridis(256))
 
 ```
 
@@ -357,6 +357,8 @@ survey.dtime <-
    d.occ.long %>%
    distinct(year, pt, per, dtime) %>%
    arrange(year, pt, per) %>%
+   mutate(dtime = case_when(is.na(dtime) ~ 7.7,
+                            TRUE ~ as.numeric(dtime))) %>%
    mutate(survey = case_when(per %in% c(1,2) ~ 1,
                              per %in% c(3,4) ~ 2, 
                              per %in% c(5,6) ~ 3,
@@ -369,11 +371,164 @@ d.extract <- d %>%
 
 
 site.cov <- cbind.data.frame(pt = as.data.frame(d.extract)$pt, 
-                             mean = raster::extract(horizon2018_mean, d.extract),
-                             max = raster::extract(horizon2018_max, d.extract)) %>%
+                             mean = 90-raster::extract(horizon2018_mean, d.extract),
+                             max = 90-raster::extract(horizon2018_max, d.extract)) %>%
    left_join(g.occ, by = "pt") %>%
    arrange(year, pt) %>%
    dplyr::select(year, pt, mean, max)
 ```
+# Create unmarked data.frame for GRSP, static occupancy, 2018 (unmarked)
+```{r}
+library(unmarked)
+g.umf <- unmarkedFrameOccu(
+   y = as.matrix(filter(g.occ, year == "year 1")[, 3:6]),
+   # Pres/Abs measurements
+   siteCovs = filter(site.cov, year == "year 1"),
+   # site-specific covs.
+   obsCovs = list(ord = (as.matrix(filter(
+      survey.ord, year == "year 1"
+   )[, 3:6])/10), dtime = (as.matrix(filter(
+      survey.dtime, year == "year 1"
+   )[, 3:6])/10))
+)         # obs-specific covs.
+summary(g.umf)
+```
+# Select best detection model using AIC
+```{r}
+  p.ord_psi. <-
+    occu(
+      ~ ord ~ 1,
+      data = g.umf
+    )
 
+  p.ord2_psi. <-
+    occu(
+      ~ ord + I(ord)^2 ~ 1,
+      data = g.umf
+    )
+
+  p.dtime_psi. <-
+    occu(
+      ~ dtime ~ 1,
+      data = g.umf
+    )
+
+  p.dtime2_psi. <-
+    occu(
+      ~ dtime + I(dtime)^2 ~ 1,
+      data = g.umf,
+      starts = c(2, 2, 2, 2)
+    )
+  
+    p.ord.dtime_psi. <-
+    occu(
+      ~ ord + dtime ~ 1,
+      data = g.umf
+    )
+
+  p.ord.dtime2_psi. <-
+    occu(
+      ~ ord + dtime + I(dtime)^2 ~ 1,
+      data = g.umf,
+      starts = c(-2, -2, -2, 2, 2)
+    )
+  
+  p.ord2.dtime_psi. <-
+    occu(
+      ~ ord + I(ord)^2 + dtime ~ 1,
+      data = g.umf
+    )
+    
+  p.ord2.dtime2_psi. <-
+    occu(
+      ~ ord + I(ord)^2 + dtime + I(dtime)^2 ~ 1,
+      data = g.umf
+    )
+  
+  AICcmodavg::aictab(
+    list(
+      p.ord_psi. = p.ord_psi.,
+      p.ord2_psi. = p.ord2_psi.,
+      p.dtime_psi. = p.dtime_psi.,
+      p.dtime2_psi. = p.dtime2_psi.,
+      p.ord.dtime_psi. = p.ord.dtime_psi.,
+      p.ord2.dtime_psi. = p.ord2.dtime_psi.,
+      p.ord2.dtime2_psi. = p.ord2.dtime2_psi.
+      )
+  )
+
+#Model selection based on AICc:
+#
+#                   K    AICc Delta_AICc AICcWt Cum.Wt      LL
+#p.ord.dtime_psi.   4 1150.90       0.00   0.60   0.60 -571.37
+#p.ord2.dtime_psi.  5 1152.99       2.09   0.21   0.81 -571.37
+#p.ord2.dtime2_psi. 6 1155.10       4.19   0.07   0.88 -571.37
+#p.ord_psi.         3 1155.13       4.22   0.07   0.96 -574.51
+#p.ord2_psi.        4 1157.19       6.29   0.03   0.98 -574.51
+#p.dtime_psi.       3 1158.57       7.67   0.01   1.00 -576.24
+#p.dtime2_psi.      4 1160.64       9.74   0.00   1.00 -576.24
+
+```
+# Evaluate mean vs. max openness models
+```{r}
+    p.ord.dtime_psi. <-
+    occu(
+      ~ ord + dtime ~ 1,
+      data = g.umf
+    )
+
+    p.ord.dtime_psi.mean <-
+    occu(
+      ~ ord + dtime ~ mean,
+      data = g.umf
+    )
+
+    p.ord.dtime_psi.max <-
+    occu(
+      ~ ord + dtime ~ max,
+      data = g.umf
+    )
+
+    p.ord.dtime_psi.lmean <-
+    occu(
+      ~ ord + dtime ~ log(mean),
+      data = g.umf
+    )
+
+    p.ord.dtime_psi.lmax <-
+    occu(
+      ~ ord + dtime ~ log(max),
+      data = g.umf
+    )
+
+  AICcmodavg::aictab(
+    list(
+      p.ord.dtime_psi. = p.ord.dtime_psi.,
+      p.ord.dtime_psi.mean = p.ord.dtime_psi.mean,
+      p.ord.dtime_psi.max = p.ord.dtime_psi.max,
+      p.ord.dtime_psi.lmean = p.ord.dtime_psi.lmean,
+      p.ord.dtime_psi.lmax = p.ord.dtime_psi.lmax
+      )
+  )    
+
+# Model selection based on AICc:
+# 
+#                       K    AICc Delta_AICc AICcWt Cum.Wt      LL
+# p.ord.dtime_psi.max   5 1136.54       0.00   0.67   0.67 -563.14
+# p.ord.dtime_psi.lmax  5 1139.13       2.58   0.18   0.86 -564.44
+# p.ord.dtime_psi.mean  5 1140.51       3.97   0.09   0.95 -565.13
+# p.ord.dtime_psi.lmean 5 1141.74       5.19   0.05   1.00 -565.74
+# p.ord.dtime_psi.      4 1150.90      14.36   0.00   1.00 -571.37
+```
+# Grasshopper sparrow: Graph relationship with max 
+```{r}
+summary(p.ord.dtime_psi.max)
+
+plotdata = data.frame(predict(p.ord.dtime_psi.max, newdata = data.frame(max = seq(6.8, 87, length.out = 100)), type = "state"),
+                      max = data.frame(max = seq(6.8, 87, length.out = 100)))
+
+ggplot(plotdata) +
+   geom_ribbon(aes(x = max, ymin = lower, ymax = upper), alpha = 0.5) +
+      geom_line(aes(x = max, y = Predicted), size = 1.5)
+```
 
