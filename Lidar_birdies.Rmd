@@ -27,11 +27,11 @@ duke <-
 Note: reprojected from NJ state plane (NAD83) into UTM zone 18 in LAStools in QGIS.
 source for all lidR code used: http://www.wvview.org/spatial_analytics/lidar/_site/index.html#lidar
 ```{r}
-las_cat18 <- readLAScatalog("data/lidar2018/")
-projection(las_cat18) <- crs(6527) # state plane nad83(2011) in US feet
-summary(las_cat18)
-
-lascheck(las_cat18)
+# las_cat18 <- readLAScatalog("data/lidar2018/")
+# projection(las_cat18) <- crs(6527) # state plane nad83(2011) in US feet
+# summary(las_cat18)
+# 
+# lascheck(las_cat18)
 ```
 # Read in and check 2008 lidar files
 Note: reprojected from long/lat into UTM zone 18 in LAStools in QGIS.
@@ -45,11 +45,11 @@ source for code: http://www.wvview.org/spatial_analytics/lidar/_site/index.html#
 ```
 # Choose scale to process 2018 lidar files
 ```{r}
-opt_chunk_size(las_cat18) <- 5100
-plot(las_cat18, chunk_pattern = TRUE)
-
-opt_chunk_buffer(las_cat18) <- 100
-plot(las_cat18, chunk_pattern = TRUE)
+# opt_chunk_size(las_cat18) <- 5100
+# plot(las_cat18, chunk_pattern = TRUE)
+# 
+# opt_chunk_buffer(las_cat18) <- 100
+# plot(las_cat18, chunk_pattern = TRUE)
 ```
 # Choose scale to process 2008 lidar files
 ```{r}
@@ -61,7 +61,7 @@ plot(las_cat18, chunk_pattern = TRUE)
 ```
 # View summary of 2018 lidar files
 ```{r}
-summary(las_cat18)
+# summary(las_cat18)
 ```
 # View summary of 2008 lidar files
 ```{r}
@@ -166,8 +166,7 @@ tm_shape(hs)+
 tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
 tm_layout(legend.outside = TRUE)
 ```
-
-
+# Remove a tree line that was not present during the bird surveys
 ```{r}
 # remove a tree line that was removed in 2018 after lidar but before survey
 # make 4 boxes to "cut down" the tree line
@@ -213,24 +212,227 @@ dsm2018.newVals <- rasterToPoints(dsm2018.newVals_step1) %>%
 # make the new raster with treelines and artifacts removed
 dsm2018.fix <- dsm2018 %>%
    setValues(dsm2018.newVals[,3])
-
 # writeRaster(dsm2018.fix, "data/dsm2018.fix.tif", overwrite = T)
+```
+# Remove powerlines to test if occupancy model fits better with or without this
+If without, then they are not likely reacting strongly to the wires
+```{r}
+boxes2018.nowires = rbind.data.frame(
+   expand.grid(
+      y = c(8799:8929),
+      x = c(9301:9358),
+      new = 3
+   ),
+   expand.grid(
+      y = c(8619:8800),
+      x = c(9292:9332),
+      new = 3
+   ),
+   expand.grid(
+      y = c(8438:8623),
+      x = c(9282:9315),
+      new = 3 
+   ),
+   expand.grid(
+      y = c(8260:8442),
+      x = c(9272:9309),
+      new = 3
+   ),
+   expand.grid(
+      y = c(8130:8263),
+      x = c(9264:9296),
+      new = 3
+   ),
+   expand.grid(
+      y = c(7987:8132),
+      x = c(9257:9286),
+      new = 3
+   ),
+   expand.grid(
+      y = c(7853:7992),
+      x = c(9249:9282),
+      new = 3 
+   ),   
+   expand.grid(
+      y = c(7702:7861),
+      x = c(9242:9314),
+      new = 3 
+   ),
+   expand.grid(
+      y = c(7684:7707),
+      x = c(9276:9336),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
 
+dsm2018.nowires.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.nowires, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.nowires <- dsm2018.fix %>%
+   setValues(dsm2018.nowires.newVals[,3])
+```
+# Remove all tree lines for scenario evaluation
+To see predicted effect on occupancy
+```{r}
+boxes2018.notrees = rbind.data.frame(
+   expand.grid( # SW tree line
+      y = c(7320:7676),
+      x = c(8483:8677),
+      new = 3
+   ),
+   expand.grid( # SE tree line
+      y = c(7545:7682),
+      x = c(8698:8853),
+      new = 3
+   ),
+   expand.grid( # N tree line
+      y = c(8356:8702),
+      x = c(8642:8805),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.notrees.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.notrees, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.notrees <- dsm2018.fix %>%
+   setValues(dsm2018.notrees.newVals[,3])
+```
+# Remove just the SW tree line for scenario evaluation
+To see predicted effect on occupancy
+```{r}
+boxes2018.noSW = rbind.data.frame(
+   expand.grid( # SW tree line
+      y = c(7320:7676),
+      x = c(8483:8677),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.noSW.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.noSW, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.noSW <- dsm2018.fix %>%
+   setValues(dsm2018.noSW.newVals[,3])
+```
+# Remove just the SE tree line for scenario evaluation
+To see predicted effect on occupancy
+```{r}
+boxes2018.noSE = rbind.data.frame(
+   expand.grid( # SE tree line
+      y = c(7545:7682),
+      x = c(8698:8853),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.noSE.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.noSE, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.noSE <- dsm2018.fix %>%
+   setValues(dsm2018.noSE.newVals[,3])
+```
+# Remove just the N tree line for scenario evaluation
+To see predicted effect on occupancy
+```{r}
+boxes2018.noN = rbind.data.frame(
+   expand.grid( # N tree line
+      y = c(8356:8702),
+      x = c(8642:8805),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.noN.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.noN, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.noN <- dsm2018.fix %>%
+   setValues(dsm2018.noN.newVals[,3])
+```
+
+# Make the final rasters for horizon analysis
+These are the corrected DSMs "flooded" to the height of the DTM plus 1.61 meters (human eye height).
+```{r}
 dtm2008_plus_eye <- dtm2008 + 1.61 # the height of Mike's eyes
 dtm2018_plus_eye <- dtm2018 + 1.61 # the height of Mike's eyes
 
 dsm.eye2008 <- max(dtm2008_plus_eye, dsm2008)
 dsm.eye2018 <- max(dtm2018_plus_eye, dsm2018)
 dsm.eye2018.fix <- max(dtm2018_plus_eye, dsm2018.fix)
+dsm.eye2018.nowires <- max(dtm2018_plus_eye, dsm2018.nowires)
+dsm.eye2018.notrees <- max(dtm2018_plus_eye, dsm2018.notrees)
+dsm.eye2018.noSW <- max(dtm2018_plus_eye, dsm2018.noSW)
+dsm.eye2018.noSE <- max(dtm2018_plus_eye, dsm2018.noSE)
+dsm.eye2018.noN <- max(dtm2018_plus_eye, dsm2018.noN)
 
 #writeRaster(dsm.eye2008, "data/dsm.eye2008.tif", overwrite = T)
 #writeRaster(dsm.eye2018, "data/dsm.eye2018.tif", overwrite = T)
 #writeRaster(dsm.eye2018.fix, "data/dsm.eye2018.fix.tif", overwrite = T)
-
-# next: 
-#   5) run r.horizon every 5 degrees in GRASS GUI 
-#   6) make raster of max & mean (use r.series in GRASS GUI)
-#   7)  test as covariate for psi
+#writeRaster(dsm.eye2018.nowires, "data/dsm.eye2018.nowires.tif", overwrite = T)
+#writeRaster(dsm.eye2018.notrees, "data/dsm.eye2018.notrees.tif", overwrite = T)
+#writeRaster(dsm.eye2018.noSW, "data/dsm.eye2018.noSW.tif", overwrite = T)
+#writeRaster(dsm.eye2018.noSE, "data/dsm.eye2018.noSE.tif", overwrite = T)
+#writeRaster(dsm.eye2018.noN, "data/dsm.eye2018.noN.tif", overwrite = T)
 ```
 
 # Map mean horizon heights from all angles
@@ -239,7 +441,7 @@ Note: I used GRASS GUI (r.horizon & r.series functions) to make the horizon rast
 horizon2018_mean <- raster("data/horizon2018fix_mean_5.tif") 
 horizon2018_max <- raster("data/horizon2018fix_max_5.tif") 
 
-plot((90-mask(horizon2018_mean, duke)), col = viridis::inferno(256)); plot((90-mask(horizon2018_max, duke)), col = viridis::viridis(256))
+plot((90-mask(horizon2018_mean, duke)), col = viridis::inferno(256)); plot((90-mask(horizon2018_max, duke)), col = viridis::inferno(256))
 
 ```
 
