@@ -15,6 +15,7 @@ library(lidR)
 library(tmap)
 library(tmaptools)
 library(lubridate)
+library(unmarked)
 ```
 # Read in shapefiles
 ```{r}
@@ -438,8 +439,8 @@ dsm.eye2018.noN <- max(dtm2018_plus_eye, dsm2018.noN)
 # Map mean horizon heights from all angles
 Note: I used GRASS GUI (r.horizon & r.series functions) to make the horizon rasters. Mean or max of 72 height-of-horizon measurements around each cell.
 ```{r}
-horizon2018_mean <- raster("data/horizon2018fix_mean_5.tif") 
-horizon2018_max <- raster("data/horizon2018fix_max_5.tif") 
+horizon2018_mean <- raster("data/big_files/horizon2018fix_mean_5.tif") 
+horizon2018_max <- raster("data/big_files/horizon2018fix_max_5.tif") 
 
 plot((90-mask(horizon2018_mean, duke)), col = viridis::inferno(256)); plot((90-mask(horizon2018_max, duke)), col = viridis::inferno(256))
 
@@ -467,7 +468,7 @@ d = read.csv("data/dukebirds2018-2019.QCed.2019-11-20.csv") %>%
       lat = pt.lat
    ) %>%
    st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
-   st_transform(crs = crs(dtm2008)) %>%
+   st_transform(crs = crs(duke)) %>%
    mutate(r.date = mdy(date)) %>%
    mutate(ord = yday(r.date)) %>%
    mutate(month = month(r.date)) %>%
@@ -499,7 +500,7 @@ pt.per.list <- d %>%
 
 d.occ.long <- d %>%
    as.data.frame() %>%
-   mutate(pres = case_when(num>0 & dist<75 ~ 1,
+   mutate(pres = case_when(num>0 & dist<40 ~ 1,
                            TRUE ~ 0)) %>%
    dplyr::select(year, pt, per, sp, pres, ord, dtime) %>%
    group_by(year, pt, per, sp, ord, dtime) %>%
@@ -517,7 +518,9 @@ g.occ <-
                              per %in% c(3,4) ~ 2, 
                              per %in% c(5,6) ~ 3,
                              per %in% c(7,8) ~ 4)) %>%
-   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres)
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres) %>%
+   mutate(site = case_when(substr(pt,1,1) == "K" ~ "K",
+                           TRUE ~ "S"))
 
 b.occ <-
    d.occ.long %>%
@@ -530,7 +533,9 @@ b.occ <-
                              per %in% c(3,4) ~ 2, 
                              per %in% c(5,6) ~ 3,
                              per %in% c(7,8) ~ 4)) %>%
-   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres)
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres) %>%
+   mutate(site = case_when(substr(pt,1,1) == "K" ~ "K",
+                           TRUE ~ "S"))
 
 e.occ <-
    d.occ.long %>%
@@ -543,7 +548,9 @@ e.occ <-
                              per %in% c(3,4) ~ 2, 
                              per %in% c(5,6) ~ 3,
                              per %in% c(7,8) ~ 4)) %>%
-   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres)
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = pres) %>%
+   mutate(site = case_when(substr(pt,1,1) == "K" ~ "K",
+                           TRUE ~ "S"))
 
 survey.ord <-
    d.occ.long %>%
@@ -553,7 +560,9 @@ survey.ord <-
                              per %in% c(3,4) ~ 2, 
                              per %in% c(5,6) ~ 3,
                              per %in% c(7,8) ~ 4)) %>%
-   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = ord)
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = ord) %>%
+   mutate(site = case_when(substr(pt,1,1) == "K" ~ "K",
+                           TRUE ~ "S"))
 
 survey.dtime <-
    d.occ.long %>%
@@ -565,23 +574,209 @@ survey.dtime <-
                              per %in% c(3,4) ~ 2, 
                              per %in% c(5,6) ~ 3,
                              per %in% c(7,8) ~ 4)) %>%
-   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = dtime)
+   pivot_wider(id = c(year, pt, survey), names_from = survey, values_from = dtime) %>%
+   mutate(site = case_when(substr(pt,1,1) == "K" ~ "K",
+                           TRUE ~ "S"))
+```
+
+# Reaing in and formatting openness rasters for site-level covariates
+```{r}
+# function to create raster of circular moving window average of openness
+mean.open = function(raster, 
+                       radius) {
+  # create the circular buffers (as matrices for the focal function)
+  circles <- focalWeight(raster, radius, type = 'circle')
+  circles[circles > 0] <- 1
+  
+  #raster[is.na(raster[])] <- 0
+  
+  mean.open.map = focal(
+    raster,
+    w = circles,
+    fun = mean,
+    pad = F,
+    NAonly = F,
+    na.rm = T
+  )
+  
+  return(mean.open.map)
+}
+
+horizon2018_mean <-
+   90 - raster("data/big_files/horizon2018fix_mean_5.tif")
+horizon2018_mean_cov <-
+    mean.open(mask(horizon2018_mean, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(horizon2018_mean_cov,
+             "data/big_files/horizon2018_mean_cov.tif",
+             overwrite = T)
+horizon2018_mean_cov <-
+   raster("data/big_files/horizon2018_mean_cov.tif")
+
+horizon2018_max <-
+   90 - raster("data/big_files/horizon2018fix_max_5.tif")
+horizon2018_max_cov <-
+   mean.open(mask(horizon2018_max, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(horizon2018_max_cov,
+            "data/big_files/horizon2018_max_cov.tif",
+            overwrite = T)
+horizon2018_max_cov <-
+   raster("data/big_files/horizon2018_max_cov.tif")
+
+horizon2018_No_trees_mean <-
+   90 - raster("data/big_files/horizon2018_No_trees_mean.tif")
+horizon2018_No_trees_mean_cov <-
+   mean.open(mask(horizon2018_No_trees_mean, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+   horizon2018_No_trees_mean_cov,
+   "data/big_files/horizon2018_No_trees_mean_cov.tif",
+   overwrite = T
+)
+horizon2018_No_trees_mean_cov <-
+   raster("data/big_files/horizon2018_No_trees_mean_cov.tif")
+
+horizon2018_No_trees_max <-
+   90 - raster("data/big_files/horizon2018_No_trees_max.tif")
+horizon2018_No_trees_max_cov <-
+   mean.open(mask(horizon2018_No_trees_max, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+   horizon2018_No_trees_max_cov,
+   "data/big_files/horizon2018_No_trees_max_cov.tif",
+   overwrite = T
+)
+horizon2018_No_trees_max_cov <-
+   raster("data/big_files/horizon2018_No_trees_max_cov.tif")
+
+horizon2018_No_wires_mean <-
+  90 - raster("data/big_files/horizon2018_No_wires_mean.tif")
+horizon2018_No_wires_mean_cov <-
+  mean.open(mask(horizon2018_No_wires_mean, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_wires_mean_cov,
+  "data/big_files/horizon2018_No_wires_mean_cov.tif",
+  overwrite = T
+)
+horizon2018_No_wires_mean_cov <-
+  raster("data/big_files/horizon2018_No_wires_mean_cov.tif")
+
+horizon2018_No_wires_max <-
+  90 - raster("data/big_files/horizon2018_No_wires_max.tif")
+horizon2018_No_wires_max_cov <-
+  mean.open(mask(horizon2018_No_wires_max, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_wires_max_cov,
+  "data/big_files/horizon2018_No_wires_max_cov.tif",
+  overwrite = T
+)
+horizon2018_No_wires_max_cov <-
+  raster("data/big_files/horizon2018_No_wires_max_cov.tif")
+
+horizon2018_No_SW_mean <-
+  90 - raster("data/big_files/horizon2018_No_SW_mean.tif")
+horizon2018_No_SW_mean_cov <-
+  mean.open(mask(horizon2018_No_SW_mean, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_SW_mean_cov,
+  "data/big_files/horizon2018_No_SW_mean_cov.tif",
+  overwrite = T
+)
+horizon2018_No_SW_mean_cov <-
+  raster("data/big_files/horizon2018_No_SW_mean_cov.tif")
+
+horizon2018_No_SW_max <-
+  90 - raster("data/big_files/horizon2018_No_SW_max.tif")
+horizon2018_No_SW_max_cov <-
+  mean.open(mask(horizon2018_No_SW_max, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_SW_max_cov,
+  "data/big_files/horizon2018_No_SW_max_cov.tif",
+  overwrite = T
+)
+horizon2018_No_SW_max_cov <-
+  raster("data/big_files/horizon2018_No_SW_max_cov.tif")
+
+horizon2018_No_SE_mean <-
+  90 - raster("data/big_files/horizon2018_No_SE_mean.tif")
+horizon2018_No_SE_mean_cov <-
+  mean.open(mask(horizon2018_No_SE_mean, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_SE_mean_cov,
+  "data/big_files/horizon2018_No_SE_mean_cov.tif",
+  overwrite = T
+)
+horizon2018_No_SE_mean_cov <-
+  raster("data/big_files/horizon2018_No_SE_mean_cov.tif")
+
+horizon2018_No_SE_max <-
+  90 - raster("data/big_files/horizon2018_No_SE_max.tif")
+horizon2018_No_SE_max_cov <-
+  mean.open(mask(horizon2018_No_SE_max, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_SE_max_cov,
+  "data/big_files/horizon2018_No_SE_max_cov.tif",
+  overwrite = T
+)
+horizon2018_No_SE_max_cov <-
+  raster("data/big_files/horizon2018_No_SE_max_cov.tif")
+
+horizon2018_No_N_mean <-
+  90 - raster("data/big_files/horizon2018_No_N3_mean.tif")
+horizon2018_No_N_mean_cov <-
+  mean.open(mask(horizon2018_No_N_mean, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_N_mean_cov,
+  "data/big_files/horizon2018_No_N_mean_cov.tif",
+  overwrite = T
+)
+horizon2018_No_N_mean_cov <-
+  raster("data/big_files/horizon2018_No_N_mean_cov.tif")
+
+horizon2018_No_N_max <-
+  90 - raster("data/big_files/horizon2018_No_N3_max.tif")
+horizon2018_No_N_max_cov <-
+  mean.open(mask(horizon2018_No_N_max, duke), radius = 40) %>%
+   mask(duke)
+writeRaster(
+  horizon2018_No_N_max_cov,
+  "data/big_files/horizon2018_No_N_max_cov.tif",
+  overwrite = T
+)
+horizon2018_No_N_max_cov <-
+  raster("data/big_files/horizon2018_No_N_max_cov.tif")
 
 d.extract <- d %>% 
    dplyr::select(pt) %>%
    distinct(pt) 
 
-
 site.cov <- cbind.data.frame(pt = as.data.frame(d.extract)$pt, 
-                             mean = 90-raster::extract(horizon2018_mean, d.extract),
-                             max = 90-raster::extract(horizon2018_max, d.extract)) %>%
+           mean2018 = raster::extract(horizon2018_mean_cov, d.extract),
+           max2018 = raster::extract(horizon2018_max_cov, d.extract),
+           No_trees_mean = raster::extract(horizon2018_No_trees_mean_cov, d.extract),
+           No_trees_max = raster::extract(horizon2018_No_trees_max_cov, d.extract),
+           No_wires_mean = raster::extract(horizon2018_No_wires_mean_cov, d.extract),
+           No_wires_max = raster::extract(horizon2018_No_wires_max_cov, d.extract),
+           No_SW_mean = raster::extract(horizon2018_No_SW_mean_cov, d.extract),
+           No_SW_max = raster::extract(horizon2018_No_SW_max_cov, d.extract),
+           No_SE_mean = raster::extract(horizon2018_No_SE_mean_cov, d.extract),
+           No_SE_max = raster::extract(horizon2018_No_SE_max_cov, d.extract),
+           No_N_mean = raster::extract(horizon2018_No_N_mean_cov, d.extract),
+           No_N_max = raster::extract(horizon2018_No_N_max_cov, d.extract)) %>%
    left_join(g.occ, by = "pt") %>%
    arrange(year, pt) %>%
-   dplyr::select(year, pt, mean, max)
+   dplyr::select(year, pt, mean2018, max2018, No_trees_mean, No_trees_max, No_wires_mean, No_wires_max,No_SW_mean, No_SW_max,No_SE_mean, No_SE_max,No_N_mean, No_N_max, site)
 ```
 # Create unmarked data.frame for GRSP, static occupancy, 2018 (unmarked)
 ```{r}
-library(unmarked)
 g.umf <- unmarkedFrameOccu(
    y = as.matrix(filter(g.occ, year == "year 1")[, 3:6]),
    # Pres/Abs measurements
@@ -589,13 +784,40 @@ g.umf <- unmarkedFrameOccu(
    # site-specific covs.
    obsCovs = list(ord = (as.matrix(filter(
       survey.ord, year == "year 1"
-   )[, 3:6])/10), dtime = (as.matrix(filter(
+   )[, 3:6]))/10, dtime = (as.matrix(filter(
       survey.dtime, year == "year 1"
-   )[, 3:6])/10))
+   )[, 3:6])))
 )         # obs-specific covs.
 summary(g.umf)
+
+g.umf.K18 <- unmarkedFrameOccu(
+   y = as.matrix(filter(g.occ, site == "K", year == "year 1")[, 3:6]),
+   # Pres/Abs measurements
+   siteCovs = filter(site.cov, site == "K", year == "year 1"),
+   # site-specific covs.
+   obsCovs = list(ord = (as.matrix(filter(
+      survey.ord, site == "K", year == "year 1"
+   )[, 3:6]))/10, dtime = (as.matrix(filter(
+      survey.dtime, site == "K", year == "year 1"
+   )[, 3:6])))
+)         # obs-specific covs.
+summary(g.umf.K18)
+
+g.umf.S18 <- unmarkedFrameOccu(
+   y = as.matrix(filter(g.occ, site == "S", year == "year 1")[, 3:6]),
+   # Pres/Abs measurements
+   siteCovs = filter(site.cov, site == "S", year == "year 1"),
+   # site-specific covs.
+   obsCovs = list(ord = (as.matrix(filter(
+      survey.ord, site == "S", year == "year 1"
+   )[, 3:6]))/10, dtime = (as.matrix(filter(
+      survey.dtime, site == "S", year == "year 1"
+   )[, 3:6])))
+)         # obs-specific covs.
+summary(g.umf.S18)
 ```
-# Select best detection model using AIC
+# Select best detection model using AIC - Grasshopper Sparrow
+Data from both sites.
 ```{r}
   p.ord_psi. <-
     occu(
@@ -644,7 +866,8 @@ summary(g.umf)
   p.ord2.dtime2_psi. <-
     occu(
       ~ ord + I(ord)^2 + dtime + I(dtime)^2 ~ 1,
-      data = g.umf
+      data = g.umf,
+      starts = c(-2, -2, -2, -2, 2, 2)
     )
   
   AICcmodavg::aictab(
@@ -659,47 +882,55 @@ summary(g.umf)
       )
   )
 
-#Model selection based on AICc:
-#
-#                   K    AICc Delta_AICc AICcWt Cum.Wt      LL
-#p.ord.dtime_psi.   4 1150.90       0.00   0.60   0.60 -571.37
-#p.ord2.dtime_psi.  5 1152.99       2.09   0.21   0.81 -571.37
-#p.ord2.dtime2_psi. 6 1155.10       4.19   0.07   0.88 -571.37
-#p.ord_psi.         3 1155.13       4.22   0.07   0.96 -574.51
-#p.ord2_psi.        4 1157.19       6.29   0.03   0.98 -574.51
-#p.dtime_psi.       3 1158.57       7.67   0.01   1.00 -576.24
-#p.dtime2_psi.      4 1160.64       9.74   0.00   1.00 -576.24
+AICcmodavg::modavg(list(p.ord_psi., p.dtime_psi., p.ord.dtime_psi.), parm = "dtime", parm.type = "detect")
+
+AICcmodavg::modavg(list(p.ord_psi., p.dtime_psi., p.ord.dtime_psi.), parm = "ord", parm.type = "detect")
+
+summary(p.ord_psi.)
+summary(p.dtime_psi.)
+summary(p.ord.dtime_psi.)
+
+# Model selection based on AICc:
+# 
+#                    K   AICc Delta_AICc AICcWt Cum.Wt      LL
+# p.ord_psi.         3 792.84       0.00   0.28   0.28 -393.37
+# p.dtime_psi.       3 793.16       0.32   0.24   0.51 -393.53
+# p.ord.dtime_psi.   4 793.43       0.58   0.21   0.72 -392.63
+# p.ord2_psi.        4 794.91       2.07   0.10   0.82 -393.37
+# p.dtime2_psi.      4 795.23       2.38   0.08   0.90 -393.53
+# p.ord2.dtime_psi.  5 795.51       2.67   0.07   0.97 -392.63
+# p.ord2.dtime2_psi. 6 797.62       4.77   0.03   1.00 -392.63
 
 ```
-# Evaluate mean vs. max openness models
+# Both - wires vs. no wires, Evaluate mean vs. max openness models
 ```{r}
     p.ord.dtime_psi. <-
     occu(
-      ~ ord + dtime ~ 1,
+      ~ ord + dtime ~ site,
       data = g.umf
     )
 
     p.ord.dtime_psi.mean <-
     occu(
-      ~ ord + dtime ~ mean,
+      ~ ord + dtime ~ site + mean2018,
       data = g.umf
     )
 
     p.ord.dtime_psi.max <-
     occu(
-      ~ ord + dtime ~ max,
+      ~ ord + dtime ~ site + max2018,
+      data = g.umf
+    )
+    
+    p.ord.dtime_psi.No_wires_mean <-
+    occu(
+      ~ ord + dtime ~ site + No_wires_mean,
       data = g.umf
     )
 
-    p.ord.dtime_psi.lmean <-
+    p.ord.dtime_psi.No_wires_max <-
     occu(
-      ~ ord + dtime ~ log(mean),
-      data = g.umf
-    )
-
-    p.ord.dtime_psi.lmax <-
-    occu(
-      ~ ord + dtime ~ log(max),
+      ~ ord + dtime ~ site + No_wires_max,
       data = g.umf
     )
 
@@ -708,29 +939,175 @@ summary(g.umf)
       p.ord.dtime_psi. = p.ord.dtime_psi.,
       p.ord.dtime_psi.mean = p.ord.dtime_psi.mean,
       p.ord.dtime_psi.max = p.ord.dtime_psi.max,
-      p.ord.dtime_psi.lmean = p.ord.dtime_psi.lmean,
-      p.ord.dtime_psi.lmax = p.ord.dtime_psi.lmax
+      p.ord.dtime_psi.No_wires_mean = p.ord.dtime_psi.No_wires_mean,
+      p.ord.dtime_psi.No_wires_max = p.ord.dtime_psi.No_wires_max
       )
   )    
 
 # Model selection based on AICc:
 # 
-#                       K    AICc Delta_AICc AICcWt Cum.Wt      LL
-# p.ord.dtime_psi.max   5 1136.54       0.00   0.67   0.67 -563.14
-# p.ord.dtime_psi.lmax  5 1139.13       2.58   0.18   0.86 -564.44
-# p.ord.dtime_psi.mean  5 1140.51       3.97   0.09   0.95 -565.13
-# p.ord.dtime_psi.lmean 5 1141.74       5.19   0.05   1.00 -565.74
-# p.ord.dtime_psi.      4 1150.90      14.36   0.00   1.00 -571.37
+#                               K   AICc Delta_AICc AICcWt Cum.Wt      LL
+# p.ord.dtime_psi.max           6 740.93       0.00   0.74   0.74 -364.28
+# p.ord.dtime_psi.No_wires_max  6 743.26       2.33   0.23   0.97 -365.45
+# p.ord.dtime_psi.mean          6 747.22       6.29   0.03   1.00 -367.43
+# p.ord.dtime_psi.No_wires_mean 6 753.83      12.90   0.00   1.00 -370.73
+# p.ord.dtime_psi.              5 762.17      21.24   0.00   1.00 -375.96
 ```
 # Grasshopper sparrow: Graph relationship with max 
 ```{r}
-summary(p.ord.dtime_psi.max)
-
-plotdata = data.frame(predict(p.ord.dtime_psi.max, newdata = data.frame(max = seq(6.8, 87, length.out = 100)), type = "state"),
-                      max = data.frame(max = seq(6.8, 87, length.out = 100)))
+plotdata = data.frame(
+   predict(
+      p.ord.dtime_psi.max,
+      newdata = data.frame(max2018 = rep(seq(
+         12.9, 66.6, length.out = 100
+      ), 2), site = c(rep("K", 100), rep("S", 100))),
+      type = "state"
+   ),
+   data.frame(max2018 = rep(seq(
+      12.9, 66.6, length.out = 100
+   ), 2), site = c(rep("K", 100), rep("S", 100)))
+)
 
 ggplot(plotdata) +
-   geom_ribbon(aes(x = max, ymin = lower, ymax = upper), alpha = 0.5) +
-      geom_line(aes(x = max, y = Predicted), size = 1.5)
+   geom_ribbon(aes(
+      x = max2018,
+      ymin = lower * 100,
+      ymax = upper * 100,
+      fill = site
+   ),
+   alpha = 0.5) +
+   geom_line(aes(x = max2018, y = Predicted * 100, fill = site), size = 1.5) +
+   scale_fill_manual(values = c("firebrick", "steelblue")) +
+   theme_bw() +
+   theme(axis.text = element_text(size = 14),
+         axis.title = element_text(size = 14)) +
+   labs(x = "Openness index (90 - max degrees to horizon)", y = "Grasshopper Sparrow Occupancy (%)", fill = "Site")
+#ggsave("figures/Fig_2_relationship_max_openness.jpg", height = 5, width = 7, dpi = 600)
 ```
+#Predicted occupancy in various openness scenarios
+Page 599-600 in AHM 1 (Kery) shows how to get bootstrapped CIs for this number
+```{r}
 
+# No action (2018 conditions)
+no_action_pred_cov <- raster::extract(horizon2018_max_cov, d.extract)
+
+pred_no_action = data.frame(
+   predict(
+      p.ord.dtime_psi.max,
+      newdata = data.frame(max2018 = no_action_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60))),
+      type = "state"
+   ),
+   data.frame(max2018 = no_action_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60)))
+)
+
+# scenario with all 3 Kaufman tree lines removed
+no_trees_pred_cov <- raster::extract(horizon2018_No_trees_max_cov, d.extract)
+
+pred_no_trees = data.frame(
+   predict(
+      p.ord.dtime_psi.max,
+      newdata = data.frame(max2018 = no_trees_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60))),
+      type = "state"
+   ),
+   data.frame(max2018 = no_trees_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60)))
+)
+
+# scenario with just SW Kaufman tree line removed
+no_SW_pred_cov <- raster::extract(horizon2018_No_SW_max_cov, d.extract)
+
+pred_no_SW = data.frame(
+   predict(
+      p.ord.dtime_psi.max,
+      newdata = data.frame(max2018 = no_SW_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60))),
+      type = "state"
+   ),
+   data.frame(max2018 = no_SW_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60)))
+)
+
+# scenario with just SE Kaufman tree line removed
+no_SE_pred_cov <- raster::extract(horizon2018_No_SE_max_cov, d.extract)
+
+pred_no_SE = data.frame(
+   predict(
+      p.ord.dtime_psi.max,
+      newdata = data.frame(max2018 = no_SE_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60))),
+      type = "state"
+   ),
+   data.frame(max2018 = no_SE_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60)))
+)
+
+# scenario with just N Kaufman tree line removed
+no_N_pred_cov <- raster::extract(horizon2018_No_N_max_cov, d.extract)
+
+pred_no_N = data.frame(
+   predict(
+      p.ord.dtime_psi.max,
+      newdata = data.frame(max2018 = no_N_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60))),
+      type = "state"
+   ),
+   data.frame(max2018 = no_N_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60)))
+)
+
+# scenario with Skeet wires removed
+no_wires_pred_cov <- raster::extract(horizon2018_No_wires_max_cov, d.extract)
+
+pred_no_wires = data.frame(
+   predict(
+      p.ord.dtime_psi.max,
+      newdata = data.frame(max2018 = no_wires_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60))),
+      type = "state"
+   ),
+   data.frame(max2018 = no_wires_pred_cov, site = c(rep("K", 59), rep("S", 59), rep("K", 60), rep("S", 60)))
+)
+
+cbind(
+aggregate(pred_no_action$Predicted, list(pred_no_action$site), sum),
+aggregate(pred_no_SW$Predicted, list(pred_no_SW$site), sum),
+aggregate(pred_no_SE$Predicted, list(pred_no_SE$site), sum),
+aggregate(pred_no_N$Predicted, list(pred_no_N$site), sum),
+aggregate(pred_no_trees$Predicted, list(pred_no_trees$site), sum),
+aggregate(pred_no_wires$Predicted, list(pred_no_wires$site), sum)
+)
+
+```
+# From Kery book:
+```{r}
+# Finally, we estimate the area of occurrence of red squirrels in Switzerland in 2007. For this, we
+# make the assumption that each MHB route samples exactly 1 km2, and, hence, we simply add up the
+# occupancy probability for each quadrat.We do this both with and without the mask cutting out areas at
+# elevation greater than 2250 m and see that our model predicts hardly any squirrels occurring at these
+# very high elevations.
+# Get extent of squirrel occurrence in 2007
+sum(predCH$Predicted) # All quadrats
+# [1] 17354.57
+sum(predCH$Predicted[CH$elevation < 2250]) # Only at elevations < 2250 m
+# [1] 17350.34
+# We also want to assess the uncertainty around this estimate via the bootstrap. We do the prediction
+# “by hand” rather than using the predict function because we don’t need the SEs and predict would
+# take way too much time when used in a bootstrapped function.
+
+# Standardise prediction covariate identical to those in analysis
+pelev <- (CH$elevation - means[1]) / sds[1]
+pforest <- (CH$forest - means[2]) / sds[2]
+# Define function that predicts occupancy under model 20
+Eocc <- function(fm) {
+betavec <- coef(fm)[1:8] # Extract coefficients in psi
+
+DM <- cbind(rep(1,length(pelev)), pelev, pelev^2, pforest, pforest^2, pelev*pforest,
+pelev*pforest^2, pelev^2*pforest) # design matrix
+pred <- plogis(DM%*%(betavec)) # Prediction = DM * param. vector
+Eocc <- sum(pred) # Sum over all Swiss quadrats (no mask)
+Eocc
+}
+(estimate.of.occurrence <- Eocc(fm20)) # Same as before, without mask
+system.time(Eocc.boot <- parboot(fm20, Eocc, nsim=1000, report=10)) # 100 sec
+plot(Eocc.boot) # Plot bootstrap distribution of extent of occurrence
+quantile(Eocc.boot@t.star, c(0.025, 0.975))
+# 2.5% 97.5%
+# 15131.14 20185.21
+# Convert these estimates to a proportion of the country
+(c(point = 17354.57, quantile(Eocc.boot@t.star, c(0.025, 0.975))) / 42275
+# point 2.5% 97.5%
+# 0.4104161 0.3579217 0.4774740
+
+```
