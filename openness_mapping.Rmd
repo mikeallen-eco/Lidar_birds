@@ -1,0 +1,585 @@
+---
+title:  "Code from 'A lidar-based openness index to aid conservation planning for grassland wildlife' (openness mapping)"
+author: "Mike Allen"
+date: "11/10/2021"
+output: html_document
+---
+# Load packages and shapefile of Duke Farms fields 
+R version 4.1.0 (2021-05-18)
+Platform: x86_64-w64-mingw32/x64 (64-bit)
+Running under: Windows 10 x64 (build 19043)
+```{r}
+library(raster) # raster_3.4-13 
+library(rgdal) # rgdal_1.5-23 
+library(sp) # sp_1.4-5 
+library(sf) # sf_1.0-1   
+library(tidyverse) # tidyverse_1.3.1
+library(lidR) # lidR_3.1.4
+library(tmap) # tmap_3.3-2
+library(tmaptools) # tmaptools_3.1-1
+
+# read in the Duke Farms field borders shapefile and transform to UTM
+duke <- 
+   read_sf("data/duke_GL_pred_areas.shp") %>%
+   st_transform(crs = 32618) 
+
+# create sf object of Duke Farms survey points
+duke_pts <- read.csv("data/grsp.occupancy.openness.csv")[,1:4] %>% 
+   dplyr::select(pt, latitude, longitude) %>%
+   st_as_sf(coords = c("longitude", "latitude"),
+            crs = 4326) %>%
+   st_transform(crs = crs(duke))
+
+# load template raster to project to (for converting to UTM)
+template <- raster("data/template.tif")
+```
+# Read in and check the lidar files
+The 9 lidar tiles used included: G8C4.laz, G8B13.laz, G8D1.laz, G8A16.laz, G8C3.laz, G8A15.laz, G8C8.laz, G8D5.laz, G8C7.laz. They were downloaded from the "Northwest New Jersey 2018" collection of New Jersey Geographic Information Network (see References). The 9 .laz files are about 750 MB total.
+```{r}
+# Read 9 lidar tiles from the folder lidar2018
+las_cat18 <- readLAScatalog("data/lidar2018/")
+
+# define their projection
+projection(las_cat18) <- crs(6527) # state plane nad83(2011) in US feet
+
+#print a summary of the files
+summary(las_cat18)
+
+# perform a check on the lidar data quality
+lascheck(las_cat18)
+```
+# Choose scale to process the lidar files
+Choose a 'chunk size' and overlap value to process point cloud data. Per the LiDAR and Image Processing in R" (see References): "It is generally good to define an overlap to avoid any gaps in generated raster grid surfaces. You will need to experiment with appropriate chunk sizes. This will depend on the point density of the data and the available memory in your computer. The goal is to provide small enough tiles so that you will not run out of memory but not too small to produce a lot of tiles and process the data inefficiently."
+```{r}
+# choose a 'chunk size' for processing and plot what it looks like
+# note: this is in units of US feet for my files
+opt_chunk_size(las_cat18) <- 5100 
+plot(las_cat18, chunk_pattern = TRUE)
+
+# choose an overlap value for the chunks for processing and plot what it looks like
+opt_chunk_buffer(las_cat18) <- 100
+plot(las_cat18, chunk_pattern = TRUE)
+```
+# View a summary of the lidar catalog again
+To confirm chunk size and overlap settings.
+```{r}
+ summary(las_cat18)
+```
+# Create & view the "bare earth" digital terrain models (DTM) from the point cloud
+```{r}
+# create directory for DTM intermediate files
+if(dir.exists("data/dtm2018/")==F){dir.create("data/dtm2018/")}
+
+# define the output folder and file naming convention
+opt_output_files(las_cat18) <- "data/dtm2018/dtm_{XLEFT}_{YBOTTOM}"
+
+# make a DTM with resolution of 1 meter
+dtm2018_step1 <-
+   grid_terrain(las_cat18,
+                res = 3.28084,
+                # this converts feet to meters to make 1 m res
+                knnidw(k = 10, p = 2),
+                keep_lowest = FALSE)
+
+# define projection
+crs(dtm2018_step1) <-
+   CRS("+init=epsg:6527") # nj state plane nad83 (2011), grs80 in US feet
+
+# reproject the raster to UTM
+# used a premade UTM raster cropped to Duke for this purpose
+dtm2018 <-
+   projectRaster(from = dtm2018_step1,
+                 to = template)
+
+# convert vertical units from feet to meters
+dtm2018 <- dtm2018 / 3.28084 
+
+# assign name to DTM
+names(dtm2018) <- "dtm2018"
+```
+# View the DTM as a hillshade
+```{r}
+slope <- terrain(dtm2018, opt='slope')
+aspect <- terrain(dtm2018, opt='aspect')
+hs <- hillShade(slope, aspect, angle=45, direction=315)
+
+tm_shape(hs)+
+tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+```
+# Create digital surface models, DSM (i.e., "bare earth + canopy height")
+```{r}
+# create directory for DSM intermediate files
+if(dir.exists("data/dsm2018/")==F){dir.create("data/dsm2018/")}
+
+# set output folder and naming convention for DSM
+opt_output_files(las_cat18) <-
+   "data/dsm2018/dsm_{XLEFT}_{YBOTTOM}"
+
+# calculate DSM
+dsm2018_step1 <-
+   grid_canopy(las_cat18, res = 3.28084, pitfree(c(0, 2, 5, 10, 15), c(0, 1)))
+
+# remove elevation outliers
+dsm2018_step1[dsm2018_step1>300] <- NA 
+
+# define projection of DSM
+crs(dsm2018_step1) <-
+    CRS("+init=epsg:6527") # nj state plane nad83 (2011), grs80 in US feet
+
+# project to UTM using template raster
+ dsm2018 <-
+    projectRaster(from = dsm2018_step1,
+                  to = template)
+
+ # convert vertical units to meters
+ dsm2018 <- dsm2018 / 3.28084
+ 
+ # fix name of DSM
+ names(dsm2018) <- "dsm2018"
+```
+# View the DSM as a hillshade
+```{r}
+slope <- terrain(dsm2018, opt='slope')
+aspect <- terrain(dsm2018, opt='aspect')
+hs <- hillShade(slope, aspect, angle=45, direction=315)
+
+tm_shape(hs)+
+tm_raster(style= "cont", palette=get_brewer_pal("Greys", plot=FALSE))+
+tm_layout(legend.outside = TRUE)
+```
+# Remove a tree line that was not present during the bird surveys
+```{r}
+# remove a tree line that was removed in 2018 after lidar but before survey
+# make 4 boxes to "cut down" the tree line
+boxes2018 = rbind.data.frame(
+   expand.grid(
+      y = c(7470:7610),
+      x = c(8635:8681),
+      new = 30.5
+   ),
+   expand.grid(
+      y = c(7408:7465),
+      x = c(8627:8661),
+      new = 29.5
+   ),
+   expand.grid(
+      y = c(7352:7410),
+      x = c(8619:8649),
+      new = 27.5
+   ),
+   expand.grid(
+      y = c(7302:7354),
+      x = c(8616:8646),
+      new = 25.5
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.newVals_step1 <- dsm2018
+dsm2018.newVals_step1[is.na(dsm2018.newVals_step1)] <- 0
+dsm2018.newVals <- rasterToPoints(dsm2018.newVals_step1) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.fix <- dsm2018 %>%
+   setValues(dsm2018.newVals[, 3])
+```
+# Remove powerlines to test if occupancy model fits better with or without this
+If without, then they are not likely reacting strongly to the wires
+```{r}
+boxes2018.nowires = rbind.data.frame(
+   expand.grid(
+      y = c(8799:8929),
+      x = c(9301:9358),
+      new = 3
+   ),
+   expand.grid(
+      y = c(8619:8800),
+      x = c(9292:9332),
+      new = 3
+   ),
+   expand.grid(
+      y = c(8438:8623),
+      x = c(9282:9315),
+      new = 3 
+   ),
+   expand.grid(
+      y = c(8260:8442),
+      x = c(9272:9309),
+      new = 3
+   ),
+   expand.grid(
+      y = c(8130:8263),
+      x = c(9264:9296),
+      new = 3
+   ),
+   expand.grid(
+      y = c(7987:8132),
+      x = c(9257:9286),
+      new = 3
+   ),
+   expand.grid(
+      y = c(7853:7992),
+      x = c(9249:9282),
+      new = 3 
+   ),   
+   expand.grid(
+      y = c(7702:7861),
+      x = c(9242:9314),
+      new = 3 
+   ),
+   expand.grid(
+      y = c(7684:7707),
+      x = c(9276:9336),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.nowires.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.nowires, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.nowires <- dsm2018.fix %>%
+   setValues(dsm2018.nowires.newVals[,3])
+```
+# Remove all tree lines for scenario evaluation
+To evaluate effect on predicted occupancy
+```{r}
+boxes2018.notrees = rbind.data.frame(
+   expand.grid( # SW tree line
+      y = c(7320:7676),
+      x = c(8483:8677),
+      new = 3
+   ),
+   expand.grid( # SE tree line
+      y = c(7545:7682),
+      x = c(8698:8853),
+      new = 3
+   ),
+   expand.grid( # N tree line
+      y = c(8356:8702),
+      x = c(8642:8805),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.notrees.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.notrees, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.notrees <- dsm2018.fix %>%
+   setValues(dsm2018.notrees.newVals[,3])
+```
+# Remove just the SW tree line for scenario evaluation
+To evaluate effect on predicted occupancy
+```{r}
+boxes2018.noSW = rbind.data.frame(
+   expand.grid( # SW tree line
+      y = c(7320:7676),
+      x = c(8483:8677),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.noSW.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.noSW, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.noSW <- dsm2018.fix %>%
+   setValues(dsm2018.noSW.newVals[,3])
+```
+# Remove just the SE tree line for scenario evaluation
+To evaluate effect on predicted occupancy
+```{r}
+boxes2018.noSE = rbind.data.frame(
+   expand.grid( # SE tree line
+      y = c(7545:7682),
+      x = c(8698:8853),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.noSE.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.noSE, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.noSE <- dsm2018.fix %>%
+   setValues(dsm2018.noSE.newVals[,3])
+```
+# Remove just the N tree line for scenario evaluation
+To evaluate effect on predicted occupancy
+```{r}
+boxes2018.noN = rbind.data.frame(
+   expand.grid( # N tree line
+      y = c(8356:8702),
+      x = c(8642:8805),
+      new = 3
+   )
+) %>%
+   group_by(y, x) %>%
+   summarise(new = mean(new)) %>%
+   ungroup() %>%
+   mutate(y = format(y + 4480000.5, digits = 8),
+          x = x + 520000.5)
+
+dsm2018.noN.newVals <- rasterToPoints(dsm2018.fix) %>%
+   as.data.frame(headers = F) %>%
+   mutate(y = as.character(y)) %>%
+   left_join(boxes2018.noN, by = c("x", "y")) %>%
+   mutate(dsm2018 = case_when(is.na(new) == T ~ dsm2018,
+                              TRUE ~ new),
+          y = as.numeric(y)) %>%
+   dplyr::select(-new)
+
+# make the new raster with treelines and artifacts removed
+dsm2018.noN <- dsm2018.fix %>%
+   setValues(dsm2018.noN.newVals[,3])
+```
+# Make the final rasters for horizon analysis
+These are the corrected DSMs "flooded" to the height of the DTM plus 1.61 meters (human eye height).
+```{r}
+# add 1.61 m to every cell in the DTM
+dtm2018_plus_eye <- dtm2018 + 1.61 # eye height
+
+# 'flood' each DSM to 1.61 m from ground height for horizon analysis
+dsm.eye2018.fix <- max(dtm2018_plus_eye, dsm2018.fix)
+dsm.eye2018.nowires <- max(dtm2018_plus_eye, dsm2018.nowires)
+dsm.eye2018.notrees <- max(dtm2018_plus_eye, dsm2018.notrees)
+dsm.eye2018.noSW <- max(dtm2018_plus_eye, dsm2018.noSW)
+dsm.eye2018.noSE <- max(dtm2018_plus_eye, dsm2018.noSE)
+dsm.eye2018.noN <- max(dtm2018_plus_eye, dsm2018.noN)
+
+# write these to tif files for horizon analysis in GRASS GIS
+#writeRaster(dsm.eye2018.fix, "data/dsm.eye2018.fix.tif", overwrite = T)
+#writeRaster(dsm.eye2018.nowires, "data/dsm.eye2018.nowires.tif", overwrite = T)
+#writeRaster(dsm.eye2018.notrees, "data/dsm.eye2018.notrees.tif", overwrite = T)
+#writeRaster(dsm.eye2018.noSW, "data/dsm.eye2018.noSW.tif", overwrite = T)
+#writeRaster(dsm.eye2018.noSE, "data/dsm.eye2018.noSE.tif", overwrite = T)
+#writeRaster(dsm.eye2018.noN, "data/dsm.eye2018.noN.tif", overwrite = T)
+```
+# Map mean horizon heights from all angles
+Note: In this step, I used the GRASS GIS GUI (r.horizon & r.series functions) to make the horizon rasters. Mean or max of 72 height-of-horizon measurements around each cell.
+
+# Load horizon rasters created using the GRASS GIS GUI 
+Rasters were created based on the "dsm.eye" rasters as described above
+```{r}
+horizon2018_mean <- raster("data/horizon_rasters/horizon2018fix_mean_5.tif") 
+horizon2018_max <- raster("data/horizon_rasters/horizon2018fix_max_5.tif") 
+
+plot((90-mask(horizon2018_mean, duke)), col = viridis::inferno(256))
+plot((90-mask(horizon2018_max, duke)), col = viridis::inferno(256))
+```
+# Formatting openness rasters for site-level covariate in occupancy analysis
+```{r}
+# function to create raster of circular moving window average of openness
+mean.open = function(raster, 
+                       radius) {
+  # create the circular buffers (as matrices for the focal function)
+  circles <- focalWeight(raster, radius, type = 'circle')
+  circles[circles > 0] <- 1
+  
+  #raster[is.na(raster[])] <- 0
+  
+  mean.open.map = focal(
+    raster,
+    w = circles,
+    fun = mean,
+    pad = F,
+    NAonly = F,
+    na.rm = T
+  )
+  
+  return(mean.open.map)
+}
+
+# load mean-angle horizon raster
+horizon2018_mean <-
+   90 - raster("data/horizon_rasters/horizon2018fix_mean_5.tif")
+
+# create 40 m moving window average version
+horizon2018_mean_cov <-
+    mean.open(mask(horizon2018_mean, duke), radius = 40) %>%
+   mask(duke)
+
+# load max-angle horizon raster
+horizon2018_max <-
+   90 - raster("data/horizon_rasters/horizon2018fix_max_5.tif")
+
+# create 40 m moving window average version
+horizon2018_max_cov <-
+   mean.open(mask(horizon2018_max, duke), radius = 40) %>%
+   mask(duke)
+
+# load mean-angle horizon raster with all trees removed
+horizon2018_No_trees_mean <-
+   90 - raster("data/horizon_rasters/horizon2018_No_trees_mean.tif")
+
+# create 40 m moving window average version
+horizon2018_No_trees_mean_cov <-
+   mean.open(mask(horizon2018_No_trees_mean, duke), radius = 40) %>%
+   mask(duke)
+
+# load max-angle horizon raster with all trees removed
+horizon2018_No_trees_max <-
+   90 - raster("data/horizon_rasters/horizon2018_No_trees_max.tif")
+
+# create 40 m moving window average version
+horizon2018_No_trees_max_cov <-
+   mean.open(mask(horizon2018_No_trees_max, duke), radius = 40) %>%
+   mask(duke)
+
+# load mean-angle horizon raster with powerlines removed
+horizon2018_No_wires_mean <-
+  90 - raster("data/horizon_rasters/horizon2018_No_wires_mean.tif")
+
+# create 40 m moving window average version
+horizon2018_No_wires_mean_cov <-
+  mean.open(mask(horizon2018_No_wires_mean, duke), radius = 40) %>%
+   mask(duke)
+
+# load max-angle horizon raster with powerlines removed
+horizon2018_No_wires_max <-
+  90 - raster("data/horizon_rasters/horizon2018_No_wires_max.tif")
+
+# create 40 m moving window average version
+horizon2018_No_wires_max_cov <-
+  mean.open(mask(horizon2018_No_wires_max, duke), radius = 40) %>%
+   mask(duke)
+
+# load mean-angle horizon raster with SW treeline removed
+horizon2018_No_SW_mean <-
+  90 - raster("data/horizon_rasters/horizon2018_No_SW_mean.tif")
+
+# create 40 m moving window average version
+horizon2018_No_SW_mean_cov <-
+  mean.open(mask(horizon2018_No_SW_mean, duke), radius = 40) %>%
+   mask(duke)
+
+# load max-angle horizon raster with SW treeline removed
+horizon2018_No_SW_max <-
+  90 - raster("data/horizon_rasters/horizon2018_No_SW_max.tif")
+
+# create 40 m moving window average version
+horizon2018_No_SW_max_cov <-
+  mean.open(mask(horizon2018_No_SW_max, duke), radius = 40) %>%
+   mask(duke)
+
+# load mean-angle horizon raster with SE treeline removed
+horizon2018_No_SE_mean <-
+  90 - raster("data/horizon_rasters/horizon2018_No_SE_mean.tif")
+
+# create 40 m moving window average version
+horizon2018_No_SE_mean_cov <-
+  mean.open(mask(horizon2018_No_SE_mean, duke), radius = 40) %>%
+   mask(duke)
+
+# load max-angle horizon raster with SE treeline removed
+horizon2018_No_SE_max <-
+  90 - raster("data/horizon_rasters/horizon2018_No_SE_max.tif")
+
+# create 40 m moving window average version
+horizon2018_No_SE_max_cov <-
+  mean.open(mask(horizon2018_No_SE_max, duke), radius = 40) %>%
+   mask(duke)
+
+# load mean-angle horizon raster with N treeline removed
+horizon2018_No_N_mean <-
+  90 - raster("data/horizon_rasters/horizon2018_No_N3_mean.tif")
+
+# create 40 m moving window average version
+horizon2018_No_N_mean_cov <-
+  mean.open(mask(horizon2018_No_N_mean, duke), radius = 40) %>%
+   mask(duke)
+
+# load max-angle horizon raster with N treeline removed
+horizon2018_No_N_max <-
+  90 - raster("data/horizon_rasters/horizon2018_No_N3_max.tif")
+
+# create 40 m moving window average version
+horizon2018_No_N_max_cov <-
+  mean.open(mask(horizon2018_No_N_max, duke), radius = 40) %>%
+   mask(duke)
+```
+# Extract openness covariate values at survey points
+```{r}
+site.cov <- cbind.data.frame(pt = as.data.frame(duke_pts)$pt, 
+           mean2018 = raster::extract(horizon2018_mean_cov, duke_pts),
+           max2018 = raster::extract(horizon2018_max_cov, duke_pts),
+           No_trees_mean = raster::extract(horizon2018_No_trees_mean_cov, duke_pts),
+           No_trees_max = raster::extract(horizon2018_No_trees_max_cov, duke_pts),
+           No_wires_mean = raster::extract(horizon2018_No_wires_mean_cov, duke_pts),
+           No_wires_max = raster::extract(horizon2018_No_wires_max_cov, duke_pts),
+           No_SW_mean = raster::extract(horizon2018_No_SW_mean_cov, duke_pts),
+           No_SW_max = raster::extract(horizon2018_No_SW_max_cov, duke_pts),
+           No_SE_mean = raster::extract(horizon2018_No_SE_mean_cov, duke_pts),
+           No_SE_max = raster::extract(horizon2018_No_SE_max_cov, duke_pts),
+           No_N_mean = raster::extract(horizon2018_No_N_mean_cov, duke_pts),
+           No_N_max = raster::extract(horizon2018_No_N_max_cov, duke_pts)) 
+```
+# References
+
+NJGIN websites for downloading "Northwest New Jersey 2018" lidar tiles
+https://njgin.nj.gov/njgin/edata/elevation/index.html#!/
+
+https://njogis-newjersey.opendata.arcgis.com/datasets/newjersey::northwest-nj-2018-lidar-tile-grid-hosted/explore?location=40.850139%2C-74.644373%2C9.19
+
+Source for lidR code
+http://www.wvview.org/spatial_analytics/lidar/_site/index.html#lidar
+
+```
+
