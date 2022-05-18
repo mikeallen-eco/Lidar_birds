@@ -1,3 +1,5 @@
+# Lidar Openness Index
+
 This repository contains all code and data needed to reproduce the analyses reported in "A lidar-based openness index to aid conservation planning for grassland wildlife" (Allen et al. 2022). 
 
 The two .rmd files contain the R code for creating and manipulating the openness index (openness_mapping.rmd) and performing the occupancy modeling (openness_occupancy_modeling.rmd).
