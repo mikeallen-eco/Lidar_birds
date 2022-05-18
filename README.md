@@ -1,6 +1,7 @@
 # Lidar Openness Index
 <img src="https://www.ace-eco.org/vol17/iss1/art16/figure1.png" width="40%" title="https://www.ace-eco.org/vol17/iss1/art16/figure1.png">
-This repository contains all code and data needed to reproduce the analyses reported in [A lidar-based openness index to aid conservation planning for grassland wildlife](https://doi.org/10.5751/ACE-02078-170116) (Allen et al. 2022; doi: 10.5751/ACE-02078-170116). The archived repository used in the paper also lives ![here on OSF](https://doi.org/10.17605/OSF.IO/VG5HU).
+
+This repository contains all code and data needed to reproduce the analyses reported in ["A lidar-based openness index to aid conservation planning for grassland wildlife"](https://doi.org/10.5751/ACE-02078-170116) (Allen et al. 2022; doi: 10.5751/ACE-02078-170116). The archived repository used in the paper also lives [here on OSF](https://osf.io/vg5hu/) (doi: 10.17605/OSF.IO/VG5HU).
 
 Potentially useful things in here: 1) instructions on how to calculate the openness index; 2) an example of using Restricted Spatial Regression (RSR) to fit an occupancy model in the presence of (lots of) spatial autocorrelation.
 
