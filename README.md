@@ -2,7 +2,7 @@
 
 This repository contains all code and data needed to reproduce the analyses reported in ["A lidar-based openness index to aid conservation planning for grassland wildlife" (Allen et al. 2022).](https://doi.org/10.5751/ACE-02078-170116) doi: 10.5751/ACE-02078-170116 
 
-Potentially useful things in here: 1) how to calculate the openness index; 2) an example of using Restricted Spatial Regression (RSR) to fit an occupancy model in the presence of (lots of) spatial autocorrelation.
+Potentially useful things in here: 1) instructions on how to calculate the openness index; 2) an example of using Restricted Spatial Regression (RSR) to fit an occupancy model in the presence of (lots of) spatial autocorrelation.
 
 ## Contents
 The two .rmd files contain the R code for creating and manipulating the openness index (openness_mapping.rmd) and performing the occupancy modeling (openness_occupancy_modeling.rmd).
