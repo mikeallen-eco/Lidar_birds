@@ -16,7 +16,7 @@ The data folder contains:
 
 - the horizon raster outputs from GRASS in the "horizon_rasters" folder (i.e., calculated mean and max angle to the horizon from each cell for each scenario - baseline, no powerlines, no treelines, no SW treeline, etc). 
 
-- the 9 lidar point cloud files in the "lidar2018" folder. These "Northwest New Jersey 2018" lidar tiles can also be downloaded here: https://njgin.nj.gov/njgin/edata/elevation/index.html#!/
+- the 9 lidar point cloud (.laz) files. These "Northwest New Jersey 2018" lidar tiles can be downloaded here: https://njgin.nj.gov/njgin/edata/elevation/index.html#!/ They are about 750 MB total and were too big for GitHub. They can also be found in the OSF repository in the "lidar2018" folder: https://doi.org/10.17605/OSF.IO/VG5HU 
 
 - the grsp.occupancy.openness.csv file, which contains all bird and covariate data needed to conduct the occupancy analysis. Descriptions of the fields in that file are as follows:
 
