@@ -34,7 +34,7 @@ duke_pts <- read.csv("data/grsp.occupancy.openness.csv")[,1:4] %>%
 template <- raster("data/template.tif")
 ```
 # Read in and check the lidar files
-The 9 lidar tiles used included: G8C4.laz, G8B13.laz, G8D1.laz, G8A16.laz, G8C3.laz, G8A15.laz, G8C8.laz, G8D5.laz, G8C7.laz. They were downloaded from the "Northwest New Jersey 2018" collection of New Jersey Geographic Information Network (see References). The 9 .laz files are about 750 MB total.
+The 9 lidar tiles used included: G8C4.laz, G8B13.laz, G8D1.laz, G8A16.laz, G8C3.laz, G8A15.laz, G8C8.laz, G8D5.laz, G8C7.laz. They were downloaded from the "Northwest New Jersey 2018" collection of New Jersey Geographic Information Network (see References). The 9 .laz files are about 750 MB total. They were too big for GitHub and can be found in the OSF repository: https://doi.org/10.17605/OSF.IO/VG5HU
 ```{r}
 # Read 9 lidar tiles from the folder lidar2018
 las_cat18 <- readLAScatalog("data/lidar2018/")
